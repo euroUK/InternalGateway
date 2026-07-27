@@ -1,0 +1,314 @@
+# Концептуальный messaging DSL для Internal Gateway.
+# Показывает:
+# 1) publish canonical event из продуктового МС в Kafka через Gateway;
+# 2) consume inbound bank/platform event и fan-out в несколько продуктовых МС;
+# 3) subscribe на Kafka депозитного процессора: новое/изменение/закрытие предложения.
+apiVersion: bank.internal-gateway/v1alpha1
+kind: MessagingModule
+
+metadata:
+  name: front-system-messaging
+  version: 1.0.0
+  owner: internal-gateway-team
+  system: front-product-system
+  description: Kafka publish/consume bindings для фронтальной системы
+
+schemas:
+  depositOffersCalculatedEvent: registry://events/deposit-offers-calculated/v1
+  organizationProfileChangedEvent: registry://events/organization-profile-changed/v1
+  processorDepositOfferEvent: registry://events/processor-deposit-offer/v1
+
+profiles:
+  resilience:
+    kafkaPublishCommand:
+      timeout: 2s
+      retries:
+        policy: idempotent-command
+        maxAttempts: 3
+        requireIdempotencyKeyForRetry: true
+        backoff: exponential-jitter
+      deadLetter:
+        topicAlias: gateway-publish-dlq
+        retainForReplay: true
+
+    internalEventDelivery:
+      timeout: 1500ms
+      retries:
+        maxAttempts: 5
+        retryOn:
+          - connect-timeout
+          - http-502
+          - http-503
+          - http-504
+        doNotRetryOn:
+          - http-409
+          - http-422
+        backoff: exponential-jitter
+      circuitBreaker:
+        failureRateThreshold: 30
+        minimumCalls: 20
+        openDuration: 20s
+
+  rateLimits:
+    kafkaPublishBudget:
+      direction: outbound
+      scope: [cluster, topicAlias]
+      distributedAcrossGatewayInstances: true
+      sustained: 500/second
+      burst: 100
+
+# Outbound: продуктовый МС не подключается к Kafka напрямую.
+messaging:
+  publishRoutes:
+    - id: publish-deposit-offers-calculated
+      exposure: internal
+      allowedCallers:
+        - deposit-offer-service
+      request:
+        method: POST
+        path: /internal/messaging/publish/deposit-offers-calculated
+        schema: depositOffersCalculatedEvent
+        idempotency:
+          required: true
+          sourceField: /eventId
+      identityContext: depositOfferService
+      authorization:
+        effect: fail-closed
+        policy: deposit.offers.publish-events
+        input:
+          workload: identity://workload
+          organizationId: request:///organizationId
+      auditProfile: platformQuery
+      resilienceProfile: kafkaPublishCommand
+      outboundRateLimitProfile: kafkaPublishBudget
+      mapping:
+        eventType: DepositOffersCalculated
+        providerSet: front-deposit-kafka
+        topicAlias: deposit-offers-calculated
+        messageKey: request:///organizationId
+        headers:
+          eventId: request:///eventId
+          eventType:
+            constant: DepositOffersCalculated
+          schemaVersion: request:///schemaVersion
+          correlationId: envelope://correlationId
+          causationId: envelope://operationId
+          sourceSystem:
+            constant: front-product-system
+          sourceService:
+            constant: deposit-offer-service
+        payload: request:///
+      acceptance:
+        mode: durable-local-wal
+        successStatus: 202
+        responseFields:
+          acceptanceId: generated
+          eventId: request:///eventId
+
+  consumeBindings:
+    - id: organization-profile-changed
+      description: Bank/platform event -> fan-out в продуктовые МС для cache invalidation
+      providerSet: bank-platform-kafka
+      source:
+        topicAlias: organization-profile-changed
+        consumerGroup: internal-gateway.front-system.organization-profile
+        startingOffset: latest
+        trustedProducers:
+          - bank-organization-directory
+      envelope:
+        schema: organizationProfileChangedEvent
+        requiredHeaders:
+          - eventId
+          - eventType
+          - schemaVersion
+          - occurredAt
+      deduplication:
+        key: header://eventId
+        store: gateway-event-dedup
+        ttl: 7d
+      fanOut:
+        mode: filtered-multicast
+        targets:
+          - id: invalidate-offer-org-cache
+            filter:
+              eventType: OrganizationProfileChanged
+            delivery:
+              service: deposit-offer-service
+              audience: deposit-offer
+              method: POST
+              path: /internal/v1/events/organization-profile-changed
+              resilienceProfile: internalEventDelivery
+              identityEnvelope:
+                mode: signed-delivery-envelope
+                claims:
+                  - eventId
+                  - eventType
+                  - occurredAt
+                  - organizationId
+              deadLetter:
+                topicAlias: gateway-delivery-dlq
+                retainForReplay: true
+
+          - id: invalidate-document-org-cache
+            filter:
+              eventType: OrganizationProfileChanged
+            delivery:
+              service: document-service
+              audience: document-service
+              method: POST
+              path: /internal/v1/events/organization-profile-changed
+              resilienceProfile: internalEventDelivery
+
+          - id: refresh-notification-templates
+            filter:
+              eventType: OrganizationProfileChanged
+              changedFieldsContainsAny:
+                - displayName
+                - legalForm
+            delivery:
+              service: notification-service
+              audience: notification-service
+              method: POST
+              path: /internal/v1/events/organization-profile-changed
+              resilienceProfile: internalEventDelivery
+      commitPolicy:
+        mode: after-durable-routing-decision
+        note: Offset commit только после durable delivery task / DLQ decision
+
+    # Подписка на Kafka депозитного процессора: authoritative catalog предложений.
+    # Deposit Offer Service не подключается к processor Kafka напрямую — только через Gateway.
+    - id: deposit-processor-offer-lifecycle
+      description: События процессора о жизненном цикле банковского депозитного предложения
+      providerSet: deposit-processor-kafka
+      source:
+        topicAlias: deposit-processor-offer-events
+        consumerGroup: internal-gateway.front-system.deposit-processor-offers
+        startingOffset: earliest
+        trustedProducers:
+          - deposit-processing-system
+      envelope:
+        schema: processorDepositOfferEvent
+        requiredHeaders:
+          - eventId
+          - eventType
+          - schemaVersion
+          - occurredAt
+          - processorOfferId
+        allowedEventTypes:
+          - DepositOfferCreated
+          - DepositOfferUpdated
+          - DepositOfferClosed
+      normalization:
+        canonicalEventType: header://eventType
+        canonicalPayload: body:///
+        canonicalKey: header://processorOfferId
+      deduplication:
+        key: header://eventId
+        store: gateway-event-dedup
+        ttl: 30d
+      fanOut:
+        mode: single-target-filtered
+        targets:
+          - id: sync-offer-catalog
+            filter:
+              eventTypeAny:
+                - DepositOfferCreated
+                - DepositOfferUpdated
+                - DepositOfferClosed
+            delivery:
+              service: deposit-offer-service
+              audience: deposit-offer
+              method: POST
+              pathByEventType:
+                DepositOfferCreated: /internal/v1/events/deposit-processor/offer-created
+                DepositOfferUpdated: /internal/v1/events/deposit-processor/offer-updated
+                DepositOfferClosed: /internal/v1/events/deposit-processor/offer-closed
+              resilienceProfile: internalEventDelivery
+              identityEnvelope:
+                mode: signed-delivery-envelope
+                claims:
+                  - eventId
+                  - eventType
+                  - occurredAt
+                  - processorOfferId
+                  - processorOfferVersion
+              deadLetter:
+                topicAlias: gateway-delivery-dlq
+                retainForReplay: true
+      commitPolicy:
+        mode: after-durable-routing-decision
+      ordering:
+        key: header://processorOfferId
+        mode: per-key-serial-delivery
+        note: Для одного processorOfferId события доставляются в порядке offset
+
+providerSets:
+  front-deposit-kafka:
+    selection:
+      strategy: fixed
+      provider: front-system-kafka
+    providers:
+      front-system-kafka:
+        type: kafka-cluster
+        cluster: front-product-system-kafka
+        auth: mtls-service-account
+        topics:
+          deposit-offers-calculated:
+            physicalTopic: front.deposit.offers.calculated.v1
+            schema: registry://events/deposit-offers-calculated/v1
+            acks: all
+            idempotentProducer: true
+          gateway-publish-dlq:
+            physicalTopic: front.gateway.publish.dlq.v1
+
+  bank-platform-kafka:
+    selection:
+      strategy: fixed
+      provider: bank-platform-kafka
+    providers:
+      bank-platform-kafka:
+        type: kafka-cluster
+        cluster: bank-platform-kafka
+        auth: mtls-system-certificate
+        topics:
+          organization-profile-changed:
+            physicalTopic: bank.organization.profile.changed.v1
+            schema: registry://events/organization-profile-changed/v1
+          gateway-delivery-dlq:
+            physicalTopic: front.gateway.delivery.dlq.v1
+
+  deposit-processor-kafka:
+    selection:
+      strategy: fixed
+      provider: deposit-processor-kafka
+    providers:
+      deposit-processor-kafka:
+        type: kafka-cluster
+        cluster: deposit-processor-kafka
+        auth: mtls-system-certificate
+        certificateSource: gateway-managed
+        note: Сертификат системы хранится в Gateway; продуктовые МС не имеют доступа к кластеру
+        topics:
+          deposit-processor-offer-events:
+            physicalTopic: deposit.processor.offer.lifecycle.v1
+            schema: registry://deposit-processor/offer-lifecycle/v1
+            valueFormat: avro
+
+observability:
+  metrics:
+    dimensions:
+      - bindingId
+      - topicAlias
+      - physicalTopic
+      - targetService
+      - deliveryOutcome
+      - consumerLag
+  alerts:
+    - name: kafka-consumer-lag-high
+      binding: organization-profile-changed
+      threshold: 1000
+    - name: deposit-processor-offer-lag-high
+      binding: deposit-processor-offer-lifecycle
+      threshold: 500
+    - name: gateway-delivery-dlq-rate
+      threshold: sustained-above-baseline

@@ -1,0 +1,801 @@
+# Концептуальный пример DSL. Это не готовая схема конкретного gateway-продукта.
+# Gateway исполняет маршрутизацию, policy, audit, resilience и вызывает
+# платформенный Business Control для frontend/simple-backend проверок.
+# Gateway не исполняет state machine и продуктовые инварианты открытия депозита.
+apiVersion: bank.internal-gateway/v1alpha1
+kind: ProductModule
+
+metadata:
+  name: deposit-front
+  version: 1.0.0
+  owner: deposit-front-team
+  system: front-product-system
+  description: Маршруты и платформенные capability процесса открытия депозита
+
+compatibility:
+  gatewayRuntime: ">=2.4 <3.0"
+  moduleSchema: v1alpha1
+  supportedPreviousVersions: 1
+
+deployment:
+  activation: canary
+  canaryPercent: 5
+  hotReload: true
+  rollbackToLastKnownGood: true
+
+identity:
+  acceptedContexts:
+    bankUser:
+      issuer: bank-api-gateway
+      authentication: signed-jwt
+      requiredClaims:
+        - subjectId
+        - organizationId
+        - authStrength
+        - sessionId
+    depositFrontService:
+      issuer: internal-workload-identity
+      authentication: mtls
+      workload: deposit-front-service
+
+  forwardedEnvelope:
+    issuer: internal-gateway
+    signature: asymmetric
+    ttl: 30s
+    audienceFromTarget: true
+    claims:
+      - subjectId
+      - organizationId
+      - delegation
+      - authStrength
+      - sessionId
+      - operationId
+      - correlationId
+      - businessControlEvidenceId
+
+schemas:
+  createApplicationRequest: registry://deposit-front/create-application-request/v1
+  createApplicationResponse: registry://deposit-front/create-application-response/v1
+  businessControlDefinitions: registry://business-control/control-definitions/v3
+  businessControlEvaluation: registry://business-control/evaluation-result/v3
+  accountDepositContext: registry://capabilities/account-deposit-context/v1
+  organizationDisplayInfo: registry://capabilities/organization-display-info/v1
+  startSigningRequest: registry://deposit-front/start-signing-request/v1
+  signingCallback: registry://signing/customer-signature-result/v2
+  executeDepositCommand: registry://deposit-processor/execute-deposit/v3
+  processorStatusEvent: registry://deposit-processor/deposit-status/v3
+
+profiles:
+  resilience:
+    depositFrontCommand:
+      timeout: 3s
+      retries:
+        maxAttempts: 1
+        requireIdempotencyKeyForRetry: true
+      circuitBreaker:
+        failureRateThreshold: 50
+        minimumCalls: 20
+        openDuration: 15s
+
+    accountContextQuery:
+      timeout: 1200ms
+      retries:
+        policy: safe-query
+        maxAttempts: 2
+        retryOn:
+          - connect-timeout
+          - http-502
+          - http-503
+          - http-504
+        doNotRetryOn:
+          - http-4xx
+          - business-rejection
+        backoff: 50ms
+      circuitBreaker:
+        failureRateThreshold: 30
+        minimumCalls: 30
+        openDuration: 10s
+      cache:
+        mode: disabled
+        reason: Состояние и право списания должны быть актуальны
+      requestCoalescing:
+        enabled: true
+        key:
+          - accountId
+          - organizationId
+        maxWait: 1200ms
+        retainAfterCompletion: 0s
+        description: Одновременные одинаковые запросы объединяются, но результат не кэшируется
+
+    organizationDisplayQuery:
+      timeout: 1s
+      retries:
+        policy: safe-query
+        maxAttempts: 2
+        retryOn:
+          - connect-timeout
+          - http-502
+          - http-503
+          - http-504
+        doNotRetryOn:
+          - http-4xx
+          - business-rejection
+        backoff: 40ms
+      circuitBreaker:
+        failureRateThreshold: 30
+        minimumCalls: 30
+        openDuration: 10s
+      cache:
+        mode: read-through
+        classification: reference-data
+        ttl: 15m
+        staleWhileRevalidate: 5m
+        staleIfError: 1h
+        key:
+          - organizationId
+          - locale
+        storeFields:
+          - organizationId
+          - displayName
+          - shortName
+          - legalForm
+          - locale
+          - sourceVersion
+        invalidateOn:
+          event: organization.profile.changed
+          keyFromEvent: organizationId
+
+    businessControlQuery:
+      timeout: 800ms
+      retries:
+        maxAttempts: 2
+        retryOn:
+          - connect-timeout
+          - http-502
+          - http-503
+        backoff: 40ms
+      circuitBreaker:
+        failureRateThreshold: 25
+        minimumCalls: 30
+        openDuration: 10s
+      cache:
+        definitions:
+          mode: versioned
+          ttl: 5m
+        evaluationResults:
+          mode: disabled
+
+    signingCommand:
+      timeout: 2s
+      retries:
+        policy: idempotent-command
+        maxAttempts: 2
+        requireIdempotencyKeyForRetry: true
+        requireDownstreamIdempotencyContract: true
+      circuitBreaker:
+        failureRateThreshold: 30
+        minimumCalls: 20
+        openDuration: 20s
+
+    processorCommand:
+      timeout: 2s
+      retries:
+        policy: idempotent-command
+        maxAttempts: 3
+        requireIdempotencyKeyForRetry: true
+        requireDownstreamIdempotencyContract: true
+        backoff: exponential-jitter
+      circuitBreaker:
+        failureRateThreshold: 25
+        minimumCalls: 20
+        openDuration: 30s
+
+  rateLimits:
+    createDepositApplication:
+      key: subjectId
+      sustained: 5/minute
+      burst: 3
+    accountContext:
+      key: workload
+      sustained: 200/second
+      burst: 50
+
+    # Outbound budget общий для всех вызывающих МС и всех экземпляров Gateway.
+    # Он защищает сторонний сервис, а не только отдельного потребителя.
+    coreAccountsSharedBudget:
+      direction: outbound
+      scope:
+        - selectedProvider
+        - operation
+      distributedAcrossGatewayInstances: true
+      algorithm: token-bucket
+      sustained: 300/second
+      burst: 60
+      maxConcurrentRequests: 100
+      fairness:
+        key: workload
+        minimumSharePerWorkload: 5/second
+        preventSingleConsumerExhaustion: true
+      onLimitExceeded:
+        queue:
+          enabled: true
+          maxWait: 75ms
+          maxDepth: 200
+        thenReturn:
+          status: 503
+          code: DOWNSTREAM_RATE_LIMITED
+          retryAfter: true
+
+    organizationDirectorySharedBudget:
+      direction: outbound
+      scope:
+        - selectedProvider
+        - operation
+      distributedAcrossGatewayInstances: true
+      algorithm: token-bucket
+      sustained: 150/second
+      burst: 30
+      maxConcurrentRequests: 50
+
+  audit:
+    securityCommand:
+      requiredBeforeProxy: true
+      delivery: local-durable-wal
+      centralDelivery: asynchronous
+      maskFields:
+        - request.accountNumber
+        - request.signature
+      include:
+        - operationId
+        - subjectId
+        - organizationId
+        - routeId
+        - moduleVersion
+        - policyDecision
+        - target
+        - outcome
+
+    platformQuery:
+      requiredBeforeProxy: true
+      delivery: local-durable-wal
+      centralDelivery: asynchronous
+      include:
+        - operationId
+        - workload
+        - subjectId
+        - organizationId
+        - routeId
+        - selectedProvider
+        - outcome
+
+# Product endpoints: банковский API Gateway -> Internal Gateway -> Deposit Front.
+routes:
+  # Frontend получает тот же версионированный набор простых контролей,
+  # который Gateway затем обязательно проверит на backend.
+  - id: get-deposit-opening-controls
+    exposure: bank-ingress
+    request:
+      method: GET
+      path: /deposit-products/{productId}/opening-controls
+      query:
+        - channel
+        - clientType
+      idempotency:
+        safe: true
+    identityContext: bankUser
+    authorization:
+      effect: fail-closed
+      policy: deposit.product.read-controls
+      input:
+        subjectId: claim://subjectId
+        organizationId: claim://organizationId
+        productId: path:///productId
+    auditProfile: platformQuery
+    resilienceProfile: businessControlQuery
+    target:
+      providerSet: business-control-provider
+      operation: get-control-definitions
+      method: GET
+      path: /v3/control-sets/deposit.application.create/definitions
+      queryMapping:
+        productId: path:///productId
+        channel: query:///channel
+        clientType: query:///clientType
+    response:
+      schema: businessControlDefinitions
+      cache:
+        key:
+          - productId
+          - channel
+          - clientType
+          - controlSetVersion
+        ttl: 5m
+
+  - id: create-deposit-application
+    exposure: bank-ingress
+    request:
+      method: POST
+      path: /deposit-applications
+      schema: createApplicationRequest
+      contentType: application/json
+      idempotency:
+        required: true
+        header: Idempotency-Key
+        scope:
+          - subjectId
+          - organizationId
+          - routeId
+    identityContext: bankUser
+    validation:
+      schema:
+        enabled: true
+        purpose: Проверка структуры и типов до вызова платформенного сервиса
+      businessControl:
+        providerSet: business-control-provider
+        operation: evaluate-controls
+        controlSet: deposit.application.create
+        controlSetVersion: active-compatible
+        stages:
+          - frontend
+          - backend-simple
+        effect: fail-closed
+        input:
+          payload: request:///
+          subjectId: claim://subjectId
+          organizationId: claim://organizationId
+          channel: header:///X-Client-Channel
+          locale: header:///Accept-Language
+        result:
+          schema: businessControlEvaluation
+          successStatuses:
+            - PASSED
+          violationStatus: 422
+          violationBody: result:///violations
+          evidence:
+            id: result:///evaluationId
+            controlSetVersion: result:///controlSetVersion
+            evaluatedAt: result:///evaluatedAt
+            includeInForwardedEnvelope: true
+        responsibility:
+          authoritativeFor:
+            - required-fields
+            - formats
+            - simple-field-ranges
+            - cross-field-simple-controls
+          excludes:
+            - account-current-state
+            - customer-eligibility
+            - product-availability
+            - application-state-machine
+    authorization:
+      effect: fail-closed
+      policy: deposit.application.create
+      input:
+        subjectId: claim://subjectId
+        organizationId: claim://organizationId
+        productId: request:///productId
+    auditProfile: securityCommand
+    rateLimitProfile: createDepositApplication
+    resilienceProfile: depositFrontCommand
+    target:
+      service: deposit-front-service
+      audience: deposit-front
+      method: POST
+      path: /internal/v1/deposit-applications
+    response:
+      schema: createApplicationResponse
+
+  - id: get-deposit-application
+    exposure: bank-ingress
+    request:
+      method: GET
+      path: /deposit-applications/{applicationId}
+    identityContext: bankUser
+    authorization:
+      effect: fail-closed
+      policy: deposit.application.read
+      input:
+        subjectId: claim://subjectId
+        organizationId: claim://organizationId
+        applicationId: path:///applicationId
+    auditProfile: securityCommand
+    resilienceProfile: depositFrontCommand
+    target:
+      service: deposit-front-service
+      audience: deposit-front
+      method: GET
+      path: /internal/v1/deposit-applications/{applicationId}
+
+  - id: start-customer-signing
+    exposure: bank-ingress
+    request:
+      method: POST
+      path: /deposit-applications/{applicationId}/signing-session
+      schema: startSigningRequest
+      idempotency:
+        required: true
+        header: Idempotency-Key
+    identityContext: bankUser
+    authorization:
+      effect: fail-closed
+      policy: deposit.application.sign
+      input:
+        subjectId: claim://subjectId
+        organizationId: claim://organizationId
+        applicationId: path:///applicationId
+    auditProfile: securityCommand
+    resilienceProfile: depositFrontCommand
+    target:
+      service: deposit-front-service
+      audience: deposit-front
+      method: POST
+      path: /internal/v1/deposit-applications/{applicationId}/signing-session
+
+# Platform capability: Deposit Front не знает, где живет состояние счета.
+# Он вызывает Internal Gateway, а provider set явно показывает фактическую зависимость.
+capabilities:
+  - id: account-deposit-context
+    exposure: internal
+    request:
+      method: GET
+      path: /internal/capabilities/accounts/{accountId}/deposit-context
+      query:
+        - organizationId
+      idempotency:
+        safe: true
+    allowedCallers:
+      - deposit-front-service
+    identityContext: depositFrontService
+    propagatedUserContext:
+      required: true
+      source: signed-forwarded-envelope
+    authorization:
+      effect: fail-closed
+      policy: account.read-for-deposit-opening
+      input:
+        workload: identity://workload
+        subjectId: envelope://subjectId
+        organizationId: query:///organizationId
+        accountId: path:///accountId
+    auditProfile: platformQuery
+    rateLimitProfile: accountContext
+    outboundRateLimitProfile: coreAccountsSharedBudget
+    resilienceProfile: accountContextQuery
+    providerSet: account-context-provider
+    canonicalResponse:
+      schema: accountDepositContext
+      requiredFields:
+        - accountId
+        - ownerOrganizationId
+        - status
+        - currency
+        - debitAllowed
+        - restrictions
+        - observedAt
+        - source
+        - sourceVersion
+      freshness:
+        maxAge: 0s
+        staleAllowed: false
+    failure:
+      mode: fail-closed
+      exposeAs: ACCOUNT_CONTEXT_UNAVAILABLE
+
+  # Справочные данные организации можно кэшировать, в отличие от состояния счета.
+  - id: organization-display-info
+    exposure: internal
+    request:
+      method: GET
+      path: /internal/capabilities/organizations/{organizationId}/display-info
+      query:
+        - locale
+      idempotency:
+        safe: true
+    allowedCallers:
+      - deposit-front-service
+      - document-service
+      - notification-service
+    identityContext: depositFrontService
+    authorization:
+      effect: fail-closed
+      policy: organization.read-display-info
+      input:
+        workload: identity://workload
+        subjectId: envelope://subjectId
+        organizationId: path:///organizationId
+    auditProfile: platformQuery
+    resilienceProfile: organizationDisplayQuery
+    outboundRateLimitProfile: organizationDirectorySharedBudget
+    providerSet: organization-directory-provider
+    canonicalResponse:
+      schema: organizationDisplayInfo
+      requiredFields:
+        - organizationId
+        - displayName
+        - shortName
+        - legalForm
+        - locale
+        - sourceVersion
+      cachePolicy: organizationDisplayQuery.cache
+    security:
+      authorizeBeforeCacheLookup: true
+      cacheContainsOnlyAllowlistedFields: true
+    failure:
+      staleAllowedAccordingToCachePolicy: true
+      exposeAs: ORGANIZATION_DIRECTORY_UNAVAILABLE
+
+  - id: create-signing-session
+    exposure: internal
+    request:
+      method: POST
+      path: /internal/capabilities/signing/sessions
+      schema: startSigningRequest
+      idempotency:
+        required: true
+        header: Idempotency-Key
+    allowedCallers:
+      - deposit-front-service
+    identityContext: depositFrontService
+    auditProfile: platformQuery
+    resilienceProfile: signingCommand
+    providerSet: customer-signing-provider
+
+  - id: submit-deposit-for-execution
+    exposure: internal
+    request:
+      method: POST
+      path: /internal/capabilities/deposit-processor/applications
+      schema: executeDepositCommand
+      idempotency:
+        required: true
+        header: Idempotency-Key
+        valueContract: "{applicationId}:{applicationVersion}"
+    allowedCallers:
+      - deposit-outbox-dispatcher
+    identityContext: depositFrontService
+    authorization:
+      effect: fail-closed
+      policy: deposit.application.execute
+      input:
+        workload: identity://workload
+        organizationId: request:///organizationId
+        applicationId: request:///applicationId
+    auditProfile: securityCommand
+    resilienceProfile: processorCommand
+    providerSet: deposit-processor-provider
+    responseSemantics:
+      acceptedMeans: Принято в обработку, депозит еще не открыт
+      acceptedStatuses:
+        - 202
+
+# Выбор lite или банковского сервиса является явной конфигурацией Gateway.
+# Автоматического fallback нет: незаметная смена источника может изменить семантику.
+providerSets:
+  business-control-provider:
+    selection:
+      strategy: fixed
+      provider: platform-business-control
+    providers:
+      platform-business-control:
+        type: internal-platform-service
+        service: business-control-service
+        apiVersion: v3
+        operations:
+          get-control-definitions:
+            method: GET
+            path: /v3/control-sets/{controlSet}/definitions
+          evaluate-controls:
+            method: POST
+            path: /v3/control-sets/{controlSet}/evaluations
+        responseContract:
+          evaluation:
+            requiredFields:
+              - evaluationId
+              - controlSet
+              - controlSetVersion
+              - status
+              - violations
+              - evaluatedAt
+        failure:
+          mode: fail-closed
+          exposeAs: BUSINESS_CONTROL_UNAVAILABLE
+
+  account-context-provider:
+    selection:
+      strategy: explicit-versioned-alias
+      configurationKey: deposit.account-context.active-provider
+      defaultAlias: legacy-lite
+      automaticFallback: false
+    providers:
+      legacy-lite:
+        type: internal-service
+        service: account-lite-service
+        method: GET
+        path: /v2/accounts/{accountId}
+        responseMapping:
+          accountId: response:///id
+          ownerOrganizationId: response:///organization/id
+          status:
+            source: response:///state
+            enum:
+              OPEN: ACTIVE
+              CLOSED: CLOSED
+              BLOCKED: BLOCKED
+          currency: response:///currency/code
+          debitAllowed: response:///permissions/debit
+          restrictions: response:///restrictions
+          observedAt: response:///updatedAt
+          source:
+            constant: account-lite-service
+          sourceVersion:
+            constant: v2
+
+      core-banking:
+        type: bank-api
+        via: existing-bank-api-gateway
+        system: core-accounts
+        apiVersion: v4
+        method: GET
+        path: /accounts/{accountId}/deposit-opening-context
+        responseMapping:
+          accountId: response:///accountId
+          ownerOrganizationId: response:///ownerOrganizationId
+          status: response:///status
+          currency: response:///currency
+          debitAllowed: response:///operations/debitAllowed
+          restrictions: response:///restrictions
+          observedAt: response:///observedAt
+          source:
+            constant: core-accounts
+          sourceVersion:
+            constant: v4
+
+  organization-directory-provider:
+    selection:
+      strategy: explicit-versioned-alias
+      configurationKey: organization.directory.active-provider
+      defaultAlias: organization-lite
+      automaticFallback: false
+    providers:
+      organization-lite:
+        type: internal-service
+        service: organization-lite-service
+        method: GET
+        path: /v2/organizations/{organizationId}
+        responseMapping:
+          organizationId: response:///id
+          displayName: response:///displayName
+          shortName: response:///shortName
+          legalForm: response:///legalForm
+          locale: request:///query/locale
+          sourceVersion:
+            constant: organization-lite-v2
+
+      bank-organization-directory:
+        type: bank-api
+        via: existing-bank-api-gateway
+        system: organization-directory
+        apiVersion: v3
+        method: GET
+        path: /organizations/{organizationId}/display-info
+        responseMapping:
+          organizationId: response:///organizationId
+          displayName: response:///displayName
+          shortName: response:///shortName
+          legalForm: response:///legalForm
+          locale: response:///locale
+          sourceVersion:
+            constant: organization-directory-v3
+
+  customer-signing-provider:
+    selection:
+      strategy: fixed
+      provider: bank-signing
+    providers:
+      bank-signing:
+        type: bank-api
+        via: existing-bank-api-gateway
+        system: customer-signing
+        apiVersion: v2
+        method: POST
+        path: /signing-sessions
+
+  deposit-processor-provider:
+    selection:
+      strategy: fixed
+      provider: deposit-processor
+    providers:
+      deposit-processor:
+        type: bank-api
+        via: existing-bank-api-gateway
+        system: deposit-processing
+        apiVersion: v3
+        method: POST
+        path: /deposit-applications
+
+# Асинхронные callback/event routes. Gateway валидирует источник и schema,
+# но state transition выполняет Deposit Front Service.
+callbacks:
+  - id: customer-signature-result
+    exposure: bank-ingress
+    request:
+      method: POST
+      path: /callbacks/signing/deposit-applications/{applicationId}
+      schema: signingCallback
+      idempotency:
+        required: true
+        sourceField: /eventId
+    sourceAuthentication:
+      type: mtls-and-signed-event
+      expectedSystem: customer-signing
+    auditProfile: securityCommand
+    target:
+      service: deposit-front-service
+      audience: deposit-front
+      method: POST
+      path: /internal/v1/callbacks/signing/deposit-applications/{applicationId}
+
+  - id: deposit-processor-status
+    exposure: bank-ingress
+    request:
+      method: POST
+      path: /callbacks/deposit-processor/applications/{applicationId}
+      schema: processorStatusEvent
+      idempotency:
+        required: true
+        sourceField: /eventId
+    sourceAuthentication:
+      type: mtls-and-signed-event
+      expectedSystem: deposit-processing
+    auditProfile: securityCommand
+    target:
+      service: deposit-front-service
+      audience: deposit-front
+      method: POST
+      path: /internal/v1/callbacks/deposit-processor/applications/{applicationId}
+
+# Только документация и observability metadata. Gateway не исполняет переходы.
+process:
+  id: open-deposit
+  owner: deposit-front-service
+  enforcedByGateway: false
+  correlationKey: applicationId
+  states:
+    - DRAFT
+    - VALIDATED
+    - AWAITING_SIGNATURE
+    - SIGNED
+    - SUBMITTED
+    - PROCESSING
+    - EXECUTED
+    - REJECTED
+    - EXPIRED
+    - CANCELLED
+  invariants:
+    - Простые frontend/backend проверки подтверждены Business Control evidence
+    - Клиентская подпись относится к точному hash и version документа
+    - Команда процессору создается только из состояния SIGNED
+    - Deposit Front Service получает свежий account context через Internal Gateway перед фиксацией подписываемых условий
+    - Deposit Front Service не дублирует Business Control rules, но проверяет продуктовые инварианты
+    - Processor command идемпотентна по applicationId и applicationVersion
+
+observability:
+  tracing:
+    propagate:
+      - traceId
+      - correlationId
+      - operationId
+      - applicationId
+  metrics:
+    dimensions:
+      - module
+      - moduleVersion
+      - routeId
+      - policy
+      - selectedProvider
+      - target
+      - outcome
+  runtimeInventory:
+    exposeResolvedDependencyGraph: true
+    includeProviderSelection: true
+    includeActiveModuleVersion: true
