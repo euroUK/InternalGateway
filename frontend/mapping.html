@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Mapping — Internal Gateway PoC</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <main class="container container-wide">
+        <nav class="top-nav">
+            <a href="index.html">Депозиты</a>
+            <a href="gateway.html">Gateway</a>
+            <a href="mapping.html" class="active">Маппинг</a>
+        </nav>
+
+        <header>
+            <h1>Event Mapping</h1>
+            <p class="subtitle">Все маппинги, зарегистрированные в Gateway (<code>*-event-mapping.yaml</code> из DSL)</p>
+        </header>
+
+        <section class="card">
+            <div class="card-header-row">
+                <h2>Зарегистрированные маппинги</h2>
+                <span id="mapping-status" class="status"></span>
+            </div>
+            <p class="hint">Клик по строке — подробности: headers, event types, body fields. Привязка к consume binding берётся из messaging DSL.</p>
+            <div id="mapping-registry"></div>
+        </section>
+    </main>
+    <script src="config.js"></script>
+    <script src="mapping.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+server:
+  port: 8092
+
+spring:
+  application:
+    name: test-processor
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+
+processor:
+  cors:
+    allowed-origins: ${PROCESSOR_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  kafka:
+    topic: ${KAFKA_PROCESSOR_TOPIC:test.processor.offer.lifecycle.v1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always

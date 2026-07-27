@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gateway — конфигурация и статистика</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <main class="container container-wide">
+        <nav class="top-nav">
+            <a href="index.html">Депозиты</a>
+            <a href="gateway.html" class="active">Gateway</a>
+            <a href="mapping.html">Маппинг</a>
+        </nav>
+
+        <header>
+            <h1>Internal Gateway</h1>
+            <p class="subtitle">Конфигурация DSL, маршруты и журнал проксирования запросов</p>
+        </header>
+
+        <section class="card">
+            <div class="card-header-row">
+                <h2>Статистика</h2>
+                <label class="inline-toggle">
+                    <input type="checkbox" id="auto-refresh" checked>
+                    Автообновление (3 сек)
+                </label>
+            </div>
+            <div id="stats-grid" class="stats-grid"></div>
+        </section>
+
+        <section class="card">
+            <h2>Runtime конфигурация</h2>
+            <div id="runtime-config" class="code-block"></div>
+        </section>
+
+        <section class="card">
+            <h2>Ingress routes</h2>
+            <div id="ingress-routes"></div>
+        </section>
+
+        <section class="card">
+            <h2>Capabilities</h2>
+            <div id="capabilities"></div>
+        </section>
+
+        <section class="card">
+            <h2>Messaging bindings</h2>
+            <div id="messaging-bindings"></div>
+        </section>
+
+        <section class="card">
+            <h2>Resilience (dedup / retry / rate limit)</h2>
+            <p class="hint">Профили из messaging DSL. Тестовый processor регистрируется автоматически (<code>test-processor-offer-lifecycle</code>).</p>
+            <div id="resilience-stats" class="code-block"></div>
+            <div id="test-processors"></div>
+            <div class="actions">
+                <button type="button" id="btn-scenario-dedup">Scenario: Dedup</button>
+                <button type="button" id="btn-scenario-retry">Scenario: Retry</button>
+                <button type="button" id="btn-scenario-rate">Scenario: Rate limit burst</button>
+            </div>
+            <p id="scenario-status" class="status"></p>
+        </section>
+
+        <section class="card">
+            <div class="card-header-row">
+                <h2>Журнал запросов</h2>
+                <span id="refresh-status" class="status"></span>
+            </div>
+            <div id="request-log"></div>
+        </section>
+    </main>
+    <script src="config.js"></script>
+    <script src="gateway.js"></script>
+</body>
+</html>

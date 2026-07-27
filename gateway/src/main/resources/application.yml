@@ -1,0 +1,38 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: internal-gateway
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+    listener:
+      ack-mode: record
+
+gateway:
+  dsl-path: ${GATEWAY_DSL_PATH:../dsl}
+  deposit-offer-service-url: ${DEPOSIT_OFFER_SERVICE_URL:http://localhost:8090}
+  envelope-secret: ${GATEWAY_ENVELOPE_SECRET:poc-envelope-secret-min-32-chars!!}
+  cors-allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  services:
+    deposit-offer-service: ${DEPOSIT_OFFER_SERVICE_URL:http://localhost:8090}
+    document-service: ${DOCUMENT_SERVICE_URL:http://localhost:8092}
+    notification-service: ${NOTIFICATION_SERVICE_URL:http://localhost:8093}
+  kafka:
+    processor-topic: ${KAFKA_PROCESSOR_TOPIC:deposit.processor.offer.lifecycle.v1}
+    consumer-group: ${KAFKA_CONSUMER_GROUP:internal-gateway.front-system.deposit-processor-offers}
+    active-binding-id: ${KAFKA_ACTIVE_BINDING_ID:deposit-processor-offer-lifecycle}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always

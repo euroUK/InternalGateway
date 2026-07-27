@@ -1,0 +1,35 @@
+# Маппинг событий депозитного процессора → каноническая модель фронтальной системы.
+# Gateway выполняет normalization до fan-out в deposit-offer-service.
+sourceSystem: deposit-processing-system
+description: Processor Kafka использует messageType/OFFER_* и другие имена полей
+
+headerMapping:
+  messageId: eventId
+  messageType: eventType
+  offerExternalId: processorOfferId
+  publishedAt: occurredAt
+
+eventTypeMapping:
+  OFFER_CREATED: DepositOfferCreated
+  OFFER_UPDATED: DepositOfferUpdated
+  OFFER_CLOSED: DepositOfferClosed
+
+bodyFieldMapping:
+  offerExternalId: processorOfferId
+  revision: processorOfferVersion
+  productExternalCode: productCode
+  interestRatePercent: rate
+  durationMonths: termMonths
+  amountRange.from: minAmount
+  amountRange.to: maxAmount
+  currencyCode: currency
+
+transforms:
+  rate:
+    from: interestRatePercent
+    rule: percent-to-decimal
+    description: "12.5 (проц.) → 0.125 (decimal)"
+
+legacyDetection:
+  headersPresent: [eventType]
+  headersAbsent: [messageType]

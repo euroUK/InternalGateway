@@ -1,0 +1,34 @@
+# Test processor mapping — same canonical model as production processor.
+sourceSystem: test-processing-system
+description: Test processor for Gateway resilience scenarios
+
+headerMapping:
+  messageId: eventId
+  messageType: eventType
+  offerExternalId: processorOfferId
+  publishedAt: occurredAt
+
+eventTypeMapping:
+  OFFER_CREATED: DepositOfferCreated
+  OFFER_UPDATED: DepositOfferUpdated
+  OFFER_CLOSED: DepositOfferClosed
+
+bodyFieldMapping:
+  offerExternalId: processorOfferId
+  revision: processorOfferVersion
+  productExternalCode: productCode
+  interestRatePercent: rate
+  durationMonths: termMonths
+  amountRange.from: minAmount
+  amountRange.to: maxAmount
+  currencyCode: currency
+
+transforms:
+  rate:
+    from: interestRatePercent
+    rule: percent-to-decimal
+    description: "12.5 (проц.) → 0.125 (decimal)"
+
+legacyDetection:
+  headersPresent: [eventType]
+  headersAbsent: [messageType]

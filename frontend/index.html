@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Депозитные предложения — PoC</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <main class="container">
+        <nav class="top-nav">
+            <a href="index.html" class="active">Депозиты</a>
+            <a href="gateway.html">Gateway</a>
+            <a href="mapping.html">Маппинг</a>
+        </nav>
+
+        <header>
+            <h1>Депозитные предложения</h1>
+            <p class="subtitle">Internal Gateway PoC — поиск offers и синхронизация из процессора через Kafka</p>
+        </header>
+
+        <section class="card">
+            <h2>Поиск предложений</h2>
+            <form id="search-form">
+                <div class="grid">
+                    <label>
+                        Organization ID
+                        <input type="text" id="organizationId" value="org-demo-001" required>
+                    </label>
+                    <label>
+                        Account ID
+                        <input type="text" id="accountId" value="acc-demo-001" required>
+                    </label>
+                    <label>
+                        Сумма
+                        <input type="number" id="amount" value="500000" min="1" required>
+                    </label>
+                    <label>
+                        Срок (мес.)
+                        <input type="number" id="termMonths" value="12" min="1" required>
+                    </label>
+                </div>
+                <button type="submit">Найти предложения</button>
+            </form>
+            <p id="search-status" class="status"></p>
+            <div id="results"></div>
+        </section>
+
+        <section class="card">
+            <h2>Processor sync demo</h2>
+            <p class="hint">Processor публикует внешний формат (<code>OFFER_CREATED</code>, <code>interestRatePercent</code>) → Gateway маппит во внутренний канонический формат</p>
+            <div class="grid">
+                <label>
+                    Processor Offer ID
+                    <input type="text" id="processorOfferId" value="proc-offer-demo-001">
+                </label>
+                <label>
+                    Product Code
+                    <input type="text" id="productCode" value="TERM-12M">
+                </label>
+                <label>
+                    Rate
+                    <input type="number" id="rate" value="0.130" step="0.001">
+                </label>
+                <label>
+                    Term (мес.)
+                    <input type="number" id="procTermMonths" value="12" min="1">
+                </label>
+            </div>
+            <div class="actions">
+                <button type="button" id="btn-created" data-event-type="DepositOfferCreated">Publish Created</button>
+                <button type="button" id="btn-updated" data-event-type="DepositOfferUpdated">Publish Updated</button>
+                <button type="button" id="btn-closed" data-event-type="DepositOfferClosed">Publish Closed</button>
+            </div>
+            <p id="processor-status" class="status"></p>
+        </section>
+    </main>
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

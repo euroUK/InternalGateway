@@ -56,6 +56,16 @@ profiles:
       distributedAcrossGatewayInstances: true
       sustained: 500/second
       burst: 100
+    processorOfferFanOut:
+      direction: inbound
+      scope: [bindingId, targetId]
+      sustained: 3/second
+      burst: 3
+    testProcessorFanOut:
+      direction: inbound
+      scope: [bindingId, targetId]
+      sustained: 2/second
+      burst: 2
 
 # Outbound: продуктовый МС не подключается к Kafka напрямую.
 messaging:
@@ -199,9 +209,10 @@ messaging:
           - DepositOfferUpdated
           - DepositOfferClosed
       normalization:
-        canonicalEventType: header://eventType
-        canonicalPayload: body:///
-        canonicalKey: header://processorOfferId
+        canonicalEventType: header://messageType
+        canonicalPayload: mapped-by-processor-event-mapping.yaml
+        canonicalKey: header://offerExternalId
+        mappingFile: processor-event-mapping.yaml
       deduplication:
         key: header://eventId
         store: gateway-event-dedup
@@ -224,6 +235,7 @@ messaging:
                 DepositOfferUpdated: /internal/v1/events/deposit-processor/offer-updated
                 DepositOfferClosed: /internal/v1/events/deposit-processor/offer-closed
               resilienceProfile: internalEventDelivery
+              rateLimitProfile: processorOfferFanOut
               identityEnvelope:
                 mode: signed-delivery-envelope
                 claims:
@@ -241,6 +253,48 @@ messaging:
         key: header://processorOfferId
         mode: per-key-serial-delivery
         note: Для одного processorOfferId события доставляются в порядке offset
+
+    - id: test-processor-offer-lifecycle
+      description: Test processor binding for Gateway resilience PoC scenarios
+      providerSet: test-processor-kafka
+      source:
+        topicAlias: test-processor-offer-events
+        consumerGroup: internal-gateway.front-system.test-processor-offers
+        startingOffset: earliest
+        trustedProducers:
+          - test-processing-system
+      normalization:
+        mappingFile: test-processor-event-mapping.yaml
+      deduplication:
+        key: header://eventId
+        store: gateway-event-dedup
+        ttl: 1h
+      fanOut:
+        mode: single-target-filtered
+        targets:
+          - id: sync-offer-catalog-test
+            filter:
+              eventTypeAny:
+                - DepositOfferCreated
+                - DepositOfferUpdated
+                - DepositOfferClosed
+            delivery:
+              service: deposit-offer-service
+              method: POST
+              pathByEventType:
+                DepositOfferCreated: /internal/v1/events/deposit-processor/offer-created
+                DepositOfferUpdated: /internal/v1/events/deposit-processor/offer-updated
+                DepositOfferClosed: /internal/v1/events/deposit-processor/offer-closed
+              resilienceProfile: internalEventDelivery
+              rateLimitProfile: testProcessorFanOut
+              identityEnvelope:
+                mode: signed-delivery-envelope
+                claims:
+                  - eventId
+                  - eventType
+                  - occurredAt
+                  - processorOfferId
+                  - processorOfferVersion
 
 providerSets:
   front-deposit-kafka:
@@ -293,6 +347,19 @@ providerSets:
             physicalTopic: deposit.processor.offer.lifecycle.v1
             schema: registry://deposit-processor/offer-lifecycle/v1
             valueFormat: avro
+
+  test-processor-kafka:
+    selection:
+      strategy: fixed
+      provider: test-processor-kafka
+    providers:
+      test-processor-kafka:
+        type: kafka-cluster
+        cluster: test-processor-kafka
+        auth: mtls-system-certificate
+        topics:
+          test-processor-offer-events:
+            physicalTopic: test.processor.offer.lifecycle.v1
 
 observability:
   metrics:
