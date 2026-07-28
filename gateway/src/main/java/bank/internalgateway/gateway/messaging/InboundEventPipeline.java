@@ -1,11 +1,9 @@
 package bank.internalgateway.gateway.messaging;
 
-import bank.internalgateway.gateway.config.GatewayProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -13,16 +11,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
-public class TestProcessorEventConsumer {
+public class InboundEventPipeline {
 
-    private static final Logger log = LoggerFactory.getLogger(TestProcessorEventConsumer.class);
-    private static final String TEST_BINDING_ID = "test-processor-offer-lifecycle";
+    private static final Logger log = LoggerFactory.getLogger(InboundEventPipeline.class);
 
     private final EventFanOutService eventFanOutService;
     private final ConfigurableEventMapper eventMapper;
     private final ConsumeBindingRegistry consumeBindingRegistry;
 
-    public TestProcessorEventConsumer(
+    public InboundEventPipeline(
             EventFanOutService eventFanOutService,
             ConfigurableEventMapper eventMapper,
             ConsumeBindingRegistry consumeBindingRegistry) {
@@ -31,23 +28,29 @@ public class TestProcessorEventConsumer {
         this.consumeBindingRegistry = consumeBindingRegistry;
     }
 
-    @KafkaListener(
-            topics = "#{@consumeBindingRegistry.kafkaTopic('test-processor-offer-lifecycle')}",
-            groupId = "#{@consumeBindingRegistry.kafkaConsumerGroup('test-processor-offer-lifecycle')}"
-    )
-    public void onTestProcessorEvent(ConsumerRecord<String, String> record) throws Exception {
-        ConsumeBindingRegistry.ConsumeBinding binding = consumeBindingRegistry.findById(TEST_BINDING_ID)
-                .orElseThrow(() -> new IllegalStateException("Test binding not found: " + TEST_BINDING_ID));
+    public void process(String bindingId, ConsumerRecord<String, String> record) throws Exception {
+        ConsumeBindingRegistry.ConsumeBinding binding = consumeBindingRegistry.findById(bindingId)
+                .orElseThrow(() -> new IllegalStateException("Kafka binding not found: " + bindingId));
+
+        String mappingFile = binding.mappingFile();
+        if (mappingFile == null || mappingFile.isBlank()) {
+            throw new IllegalStateException("Binding '" + bindingId + "' has no normalization.mappingFile");
+        }
 
         Map<String, String> headers = readHeaders(record);
-        CanonicalInboundEvent canonical = eventMapper.map(binding.mappingFile(), headers, record.value());
+        CanonicalInboundEvent canonical = eventMapper.map(mappingFile, headers, record.value());
 
         if (canonical.eventId() == null || canonical.eventType() == null) {
-            log.warn("Skipping test processor record with missing mapped identity: offset={}", record.offset());
+            log.warn("Skipping Kafka record with missing mapped identity: binding={} offset={}", bindingId, record.offset());
             return;
         }
 
-        eventFanOutService.deliver(TEST_BINDING_ID, canonical);
+        try {
+            eventFanOutService.deliver(bindingId, canonical);
+        } catch (Exception ex) {
+            log.error("Failed to fan-out event binding={} eventId={}", bindingId, canonical.eventId(), ex);
+            throw ex;
+        }
     }
 
     private Map<String, String> readHeaders(ConsumerRecord<String, String> record) {

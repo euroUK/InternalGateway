@@ -1,0 +1,11 @@
+{
+  "revision": 1,
+  "productExternalCode": "TERM-TEST",
+  "interestRatePercent": 10.0,
+  "durationMonths": 10,
+  "amountRange": {
+    "from": 1000,
+    "to": 1000000
+  },
+  "currencyCode": "RUB"
+}

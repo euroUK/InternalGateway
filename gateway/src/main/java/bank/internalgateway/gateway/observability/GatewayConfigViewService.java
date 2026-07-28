@@ -6,6 +6,8 @@ import bank.internalgateway.gateway.dsl.DslLoader;
 import bank.internalgateway.gateway.messaging.ConsumeBindingRegistry;
 import bank.internalgateway.gateway.messaging.EventMappingModels;
 import bank.internalgateway.gateway.messaging.EventMappingRegistry;
+import bank.internalgateway.gateway.dsl.DslMaps;
+import bank.internalgateway.gateway.resilience.ResilienceProfileRegistry;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -22,18 +24,21 @@ public class GatewayConfigViewService {
     private final ServiceUrlResolver serviceUrlResolver;
     private final EventMappingRegistry eventMappingRegistry;
     private final ConsumeBindingRegistry consumeBindingRegistry;
+    private final ResilienceProfileRegistry resilienceProfileRegistry;
 
     public GatewayConfigViewService(
             DslLoader dslLoader,
             GatewayProperties properties,
             ServiceUrlResolver serviceUrlResolver,
             EventMappingRegistry eventMappingRegistry,
-            ConsumeBindingRegistry consumeBindingRegistry) {
+            ConsumeBindingRegistry consumeBindingRegistry,
+            ResilienceProfileRegistry resilienceProfileRegistry) {
         this.dslLoader = dslLoader;
         this.properties = properties;
         this.serviceUrlResolver = serviceUrlResolver;
         this.eventMappingRegistry = eventMappingRegistry;
         this.consumeBindingRegistry = consumeBindingRegistry;
+        this.resilienceProfileRegistry = resilienceProfileRegistry;
     }
 
     public GatewayConfigView build() {
@@ -55,17 +60,27 @@ public class GatewayConfigViewService {
     private Map<String, Object> runtimeConfig() {
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("dslPath", properties.dslPath());
-        config.put("depositOfferServiceUrl", properties.depositOfferServiceUrl());
         config.put("corsAllowedOrigins", properties.corsAllowedOrigins());
         config.put("services", serviceUrlResolver.configuredServices());
         if (properties.kafka() != null) {
-            config.put("activeKafkaBindingId", properties.kafka().activeBindingId());
+            config.put("kafkaListenerBindings", properties.kafka().listenerBindings());
         }
+        config.put("resilienceProfiles", resilienceProfileRegistry.allProfiles().values().stream()
+                .map(profile -> Map.of(
+                        "name", profile.name(),
+                        "maxAttempts", profile.maxAttempts(),
+                        "timeout", profile.timeout() != null ? profile.timeout().toString() : null,
+                        "backoff", profile.backoff(),
+                        "circuitBreaker", profile.circuitBreaker(),
+                        "deadLetter", profile.deadLetter()
+                ))
+                .toList());
+        config.put("rateLimitProfiles", resilienceProfileRegistry.allRateLimits());
         return config;
     }
 
     private EventMappingModels.MappingConfigView primaryEventMappingView() {
-        String bindingId = properties.kafka() != null ? properties.kafka().activeBindingId() : null;
+        String bindingId = primaryListenerBindingId();
         if (bindingId != null) {
             return eventMappingRegistry.configViewForBinding(bindingId);
         }
@@ -84,7 +99,7 @@ public class GatewayConfigViewService {
                 "POST",
                 "/deposit-offers/search",
                 "deposit-offer-service",
-                properties.depositOfferServiceUrl() + "/internal/v1/offers/search",
+                serviceUrlResolver.resolve("deposit-offer-service") + "/internal/v1/offers/search",
                 "PoC ingress: Business Control stub + identity envelope"
         ));
 
@@ -94,14 +109,14 @@ public class GatewayConfigViewService {
                 if (!(item instanceof Map<?, ?> route)) {
                     continue;
                 }
-                String id = stringValue(route.get("id"));
-                Map<String, Object> request = mapValue(route.get("request"));
-                Map<String, Object> target = mapValue(route.get("target"));
+                String id = DslMaps.stringValue(route.get("id"));
+                Map<String, Object> request = DslMaps.mapValue(route.get("request"));
+                Map<String, Object> target = DslMaps.mapValue(route.get("target"));
                 if (request == null) {
                     continue;
                 }
-                String path = stringValue(request.get("path"));
-                String method = stringValue(request.get("method"));
+                String path = DslMaps.stringValue(request.get("path"));
+                String method = DslMaps.stringValue(request.get("method"));
                 if (path == null || method == null) {
                     continue;
                 }
@@ -112,8 +127,8 @@ public class GatewayConfigViewService {
                         id,
                         method,
                         path,
-                        stringValue(target != null ? target.get("service") : null),
-                        target != null ? stringValue(target.get("path")) : null,
+                        DslMaps.stringValue(target != null ? target.get("service") : null),
+                        target != null ? DslMaps.stringValue(target.get("path")) : null,
                         "Declared in deposit-opening-gateway.dsl.yaml"
                 ));
             }
@@ -145,13 +160,13 @@ public class GatewayConfigViewService {
                 if (!(item instanceof Map<?, ?> capability)) {
                     continue;
                 }
-                String id = stringValue(capability.get("id"));
-                Map<String, Object> request = mapValue(capability.get("request"));
+                String id = DslMaps.stringValue(capability.get("id"));
+                Map<String, Object> request = DslMaps.mapValue(capability.get("request"));
                 if (request == null) {
                     continue;
                 }
-                String path = stringValue(request.get("path"));
-                String method = stringValue(request.get("method"));
+                String path = DslMaps.stringValue(request.get("path"));
+                String method = DslMaps.stringValue(request.get("method"));
                 if (path == null || result.stream().anyMatch(c -> c.path().equals(path))) {
                     continue;
                 }
@@ -159,7 +174,7 @@ public class GatewayConfigViewService {
                         id,
                         method,
                         path,
-                        stringValue(capability.get("providerSet")),
+                        DslMaps.stringValue(capability.get("providerSet")),
                         "Declared in deposit-opening-gateway.dsl.yaml"
                 ));
             }
@@ -200,13 +215,13 @@ public class GatewayConfigViewService {
                     if (!(item instanceof Map<?, ?> route)) {
                         continue;
                     }
-                    Map<String, Object> mapping = mapValue(route.get("mapping"));
-                    Map<String, Object> request = mapValue(route.get("request"));
-                    String publishPath = request != null ? stringValue(request.get("path")) : null;
+                    Map<String, Object> mapping = DslMaps.mapValue(route.get("mapping"));
+                    Map<String, Object> request = DslMaps.mapValue(route.get("request"));
+                    String publishPath = request != null ? DslMaps.stringValue(request.get("path")) : null;
                     bindings.add(new MessagingBindingView(
-                            stringValue(route.get("id")),
+                            DslMaps.stringValue(route.get("id")),
                             "publish",
-                            mapping != null ? stringValue(mapping.get("topicAlias")) : null,
+                            mapping != null ? DslMaps.stringValue(mapping.get("topicAlias")) : null,
                             null,
                             null,
                             null,
@@ -233,13 +248,12 @@ public class GatewayConfigViewService {
         return result;
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> mapValue(Object value) {
-        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : null;
-    }
-
-    private String stringValue(Object value) {
-        return value != null ? value.toString() : null;
+    private String primaryListenerBindingId() {
+        if (properties.kafka() == null || properties.kafka().listenerBindings() == null
+                || properties.kafka().listenerBindings().isEmpty()) {
+            return null;
+        }
+        return properties.kafka().listenerBindings().getFirst();
     }
 
     public record GatewayConfigView(

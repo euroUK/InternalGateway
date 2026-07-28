@@ -28,7 +28,8 @@ public final class EventMappingModels {
     public record TransformRule(
             String rule,
             String from,
-            String description
+            String description,
+            Integer scale
     ) {
     }
 

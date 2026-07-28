@@ -1,5 +1,6 @@
 package bank.internalgateway.gateway.test;
 
+import bank.internalgateway.gateway.config.GatewayProperties;
 import bank.internalgateway.gateway.config.ServiceUrlResolver;
 import bank.internalgateway.gateway.messaging.CanonicalInboundEvent;
 import bank.internalgateway.gateway.messaging.ConfigurableEventMapper;
@@ -8,12 +9,15 @@ import bank.internalgateway.gateway.messaging.EventFanOutService;
 import bank.internalgateway.gateway.resilience.EventDedupCache;
 import bank.internalgateway.gateway.resilience.GatewayRateLimiter;
 import bank.internalgateway.gateway.resilience.ResilienceMetricsService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
-import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +25,9 @@ import java.util.UUID;
 
 @Service
 public class TestScenarioService {
+
+    private static final String OFFER_CREATED_PUBLISH_FIXTURE = "test-fixtures/offer-created-publish.json";
+    private static final String OFFER_CREATED_PAYLOAD_FIXTURE = "test-fixtures/offer-created-payload.json";
 
     private final TestProcessorRegistry testProcessorRegistry;
     private final EventFanOutService eventFanOutService;
@@ -32,6 +39,7 @@ public class TestScenarioService {
     private final ResilienceMetricsService metricsService;
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
+    private final GatewayProperties properties;
 
     public TestScenarioService(
             TestProcessorRegistry testProcessorRegistry,
@@ -43,7 +51,8 @@ public class TestScenarioService {
             GatewayRateLimiter rateLimiter,
             ResilienceMetricsService metricsService,
             RestClient restClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            GatewayProperties properties) {
         this.testProcessorRegistry = testProcessorRegistry;
         this.eventFanOutService = eventFanOutService;
         this.eventMapper = eventMapper;
@@ -54,6 +63,7 @@ public class TestScenarioService {
         this.metricsService = metricsService;
         this.restClient = restClient;
         this.objectMapper = objectMapper;
+        this.properties = properties;
     }
 
     public Map<String, Object> runDedupScenario(String bindingId) throws Exception {
@@ -71,7 +81,7 @@ public class TestScenarioService {
     }
 
     public Map<String, Object> runRetryScenario(String bindingId, int failCount) {
-        configureOfferServiceFault(failCount, 503);
+        configureOfferServiceFault(failCount, defaultFaultStatus());
         TestProcessorRegistry.TestProcessorRegistration processor = requireTestProcessor(bindingId);
         String offerId = "retry-" + UUID.randomUUID();
         publishViaTestProcessor(processor, offerId);
@@ -126,7 +136,7 @@ public class TestScenarioService {
     private void configureOfferServiceFault(int failCount, int statusCode) {
         String offerServiceUrl = serviceUrlResolver.resolve("deposit-offer-service");
         restClient.post()
-                .uri(offerServiceUrl + "/internal/test/fault")
+                .uri(offerServiceUrl + faultPath())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("failNextRequests", failCount, "statusCode", statusCode))
                 .retrieve()
@@ -134,18 +144,10 @@ public class TestScenarioService {
     }
 
     private void publishViaTestProcessor(TestProcessorRegistry.TestProcessorRegistration processor, String offerId) {
-        String url = processor.demoBaseUrl() + "/demo/publish-offer-event";
-        Map<String, Object> body = Map.of(
-                "eventType", "OFFER_CREATED",
-                "processorOfferId", offerId,
-                "processorOfferVersion", 1,
-                "productCode", "TERM-TEST",
-                "rate", 10.0,
-                "termMonths", 10,
-                "minAmount", 1000,
-                "maxAmount", 1000000,
-                "currency", "RUB"
-        );
+        String url = processor.demoBaseUrl() + demoPublishPath();
+        Map<String, Object> body = loadFixture(OFFER_CREATED_PUBLISH_FIXTURE);
+        body = new LinkedHashMap<>(body);
+        body.put("processorOfferId", offerId);
         restClient.post()
                 .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -159,17 +161,38 @@ public class TestScenarioService {
                 "messageType", "OFFER_CREATED",
                 "messageId", eventId,
                 "offerExternalId", "offer-" + eventId,
-                "publishedAt", java.time.Instant.now().toString()
+                "publishedAt", Instant.now().toString()
         );
-        String payload = objectMapper.writeValueAsString(Map.of(
-                "offerExternalId", "offer-" + eventId,
-                "revision", 1,
-                "productExternalCode", "TERM-TEST",
-                "interestRatePercent", 10.0,
-                "durationMonths", 10,
-                "amountRange", Map.of("from", 1000, "to", 1000000),
-                "currencyCode", "RUB"
-        ));
-        return eventMapper.map(mappingFile, headers, payload);
+        Map<String, Object> payload = loadFixture(OFFER_CREATED_PAYLOAD_FIXTURE);
+        payload = new LinkedHashMap<>(payload);
+        payload.put("offerExternalId", "offer-" + eventId);
+        String payloadJson = objectMapper.writeValueAsString(payload);
+        return eventMapper.map(mappingFile, headers, payloadJson);
+    }
+
+    private Map<String, Object> loadFixture(String classpathLocation) {
+        try {
+            JsonNode node = objectMapper.readTree(new ClassPathResource(classpathLocation).getInputStream());
+            return objectMapper.convertValue(node, new TypeReference<>() {
+            });
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to load test fixture: " + classpathLocation, ex);
+        }
+    }
+
+    private String faultPath() {
+        return properties.testHarness() != null && properties.testHarness().faultPath() != null
+                ? properties.testHarness().faultPath()
+                : "/internal/test/fault";
+    }
+
+    private String demoPublishPath() {
+        return properties.testHarness() != null && properties.testHarness().demoPublishPath() != null
+                ? properties.testHarness().demoPublishPath()
+                : "/demo/publish-offer-event";
+    }
+
+    private int defaultFaultStatus() {
+        return properties.testHarness() != null ? properties.testHarness().defaultFaultStatus() : 503;
     }
 }

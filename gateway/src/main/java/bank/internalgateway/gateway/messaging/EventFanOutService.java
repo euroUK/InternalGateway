@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -132,19 +131,21 @@ public class EventFanOutService {
                 event.mappingSummary());
 
         String traceInbound = inboundPath + " [" + event.sourceMessageType() + "→" + event.eventType() + "]";
-        String resilienceProfile = route.resilienceProfile() != null
-                ? route.resilienceProfile()
-                : "internalEventDelivery";
+        if (route.resilienceProfile() == null || route.resilienceProfile().isBlank()) {
+            throw new IllegalStateException(
+                    "Fan-out target '" + route.targetId() + "' on binding '" + binding.bindingId()
+                            + "' must declare delivery.resilienceProfile");
+        }
 
         ResilienceDeliveryExecutor.DeliveryResult result = deliveryExecutor.deliver(
-                resilienceProfile,
+                route.resilienceProfile(),
                 route.method(),
                 targetUrl,
                 payloadJson,
                 request -> request
-                        .header("X-Delivery-Envelope", envelope)
-                        .header("X-Event-Id", event.eventId())
-                        .header("X-Event-Type", event.eventType())
+                        .header(DeliveryHeaders.DELIVERY_ENVELOPE, envelope)
+                        .header(DeliveryHeaders.EVENT_ID, event.eventId())
+                        .header(DeliveryHeaders.EVENT_TYPE, event.eventType())
         );
 
         String detail = result.attempts() > 1
@@ -159,7 +160,7 @@ public class EventFanOutService {
                     route.service(),
                     targetUrl,
                     event.eventId(),
-                    "202",
+                    formatTraceStatus(result.statusCode(), true),
                     System.currentTimeMillis() - started,
                     detail
             );
@@ -173,7 +174,7 @@ public class EventFanOutService {
                 route.service(),
                 targetUrl,
                 event.eventId(),
-                result.statusCode() != null ? String.valueOf(result.statusCode()) : "ERROR",
+                formatTraceStatus(result.statusCode(), false),
                 System.currentTimeMillis() - started,
                 result.detail()
         );
@@ -209,5 +210,12 @@ public class EventFanOutService {
     private String stringClaimValue(CanonicalInboundEvent event, String claimName) {
         Object value = resolveClaimValue(event, claimName);
         return value != null ? String.valueOf(value) : null;
+    }
+
+    private static String formatTraceStatus(Integer statusCode, boolean success) {
+        if (statusCode != null) {
+            return String.valueOf(statusCode);
+        }
+        return success ? "SUCCESS" : "ERROR";
     }
 }

@@ -1,0 +1,10 @@
+{
+  "eventType": "OFFER_CREATED",
+  "processorOfferVersion": 1,
+  "productCode": "TERM-TEST",
+  "rate": 10.0,
+  "termMonths": 10,
+  "minAmount": 1000,
+  "maxAmount": 1000000,
+  "currency": "RUB"
+}

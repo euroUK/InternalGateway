@@ -16,22 +16,33 @@ import java.util.UUID;
 public class IdentityEnvelopeService {
 
     private final SecretKey secretKey;
+    private final String issuer;
+    private final int ttlSeconds;
+    private final String businessControlEvidenceId;
 
     public IdentityEnvelopeService(GatewayProperties properties) {
         this.secretKey = Keys.hmacShaKeyFor(properties.envelopeSecret().getBytes(StandardCharsets.UTF_8));
+        GatewayProperties.Envelope envelope = properties.envelope();
+        this.issuer = envelope != null && envelope.issuer() != null ? envelope.issuer() : "internal-gateway";
+        this.ttlSeconds = envelope != null && envelope.ttlSeconds() != null && envelope.ttlSeconds() > 0
+                ? envelope.ttlSeconds()
+                : 30;
+        this.businessControlEvidenceId = envelope != null && envelope.businessControlEvidenceId() != null
+                ? envelope.businessControlEvidenceId()
+                : "poc-stub-passed";
     }
 
     public String createBankUserEnvelope(String subjectId, String organizationId, String correlationId) {
         Instant now = Instant.now();
         return Jwts.builder()
-                .issuer("internal-gateway")
+                .issuer(issuer)
                 .subject(subjectId)
                 .claim("organizationId", organizationId)
                 .claim("correlationId", correlationId)
                 .claim("operationId", UUID.randomUUID().toString())
-                .claim("businessControlEvidenceId", "poc-stub-passed")
+                .claim("businessControlEvidenceId", businessControlEvidenceId)
                 .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plusSeconds(30)))
+                .expiration(Date.from(now.plusSeconds(ttlSeconds)))
                 .signWith(secretKey)
                 .compact();
     }
@@ -39,10 +50,10 @@ public class IdentityEnvelopeService {
     public String createDeliveryEnvelope(Map<String, Object> claims) {
         Instant now = Instant.now();
         var builder = Jwts.builder()
-                .issuer("internal-gateway")
+                .issuer(issuer)
                 .claim("deliveryMode", "signed-delivery-envelope")
                 .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plusSeconds(30)))
+                .expiration(Date.from(now.plusSeconds(ttlSeconds)))
                 .signWith(secretKey);
         claims.forEach(builder::claim);
         return builder.compact();

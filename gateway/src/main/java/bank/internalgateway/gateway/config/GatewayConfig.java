@@ -1,6 +1,5 @@
 package bank.internalgateway.gateway.config;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
@@ -16,7 +15,10 @@ public class GatewayConfig {
     }
 
     @Bean
-    WebMvcConfigurer corsConfigurer(@Value("${gateway.cors.allowed-origins:http://localhost:3000}") String allowedOrigins) {
+    WebMvcConfigurer corsConfigurer(GatewayProperties properties) {
+        String allowedOrigins = properties.corsAllowedOrigins() != null
+                ? properties.corsAllowedOrigins()
+                : "http://localhost:3000";
         return new WebMvcConfigurer() {
             @Override
             public void addCorsMappings(CorsRegistry registry) {

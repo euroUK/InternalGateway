@@ -1,7 +1,8 @@
 package bank.internalgateway.gateway.web;
 
-import bank.internalgateway.gateway.config.GatewayProperties;
+import bank.internalgateway.gateway.config.ServiceUrlResolver;
 import bank.internalgateway.gateway.identity.IdentityEnvelopeService;
+import bank.internalgateway.gateway.messaging.DeliveryHeaders;
 import bank.internalgateway.gateway.observability.RequestTraceService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,18 +24,20 @@ import java.util.UUID;
 public class IngressController {
 
     private static final Logger log = LoggerFactory.getLogger(IngressController.class);
+    private static final String DEPOSIT_OFFER_SERVICE = "deposit-offer-service";
+    private static final String OFFERS_SEARCH_PATH = "/internal/v1/offers/search";
 
-    private final GatewayProperties properties;
+    private final ServiceUrlResolver serviceUrlResolver;
     private final IdentityEnvelopeService identityEnvelopeService;
     private final RestClient restClient;
     private final RequestTraceService requestTraceService;
 
     public IngressController(
-            GatewayProperties properties,
+            ServiceUrlResolver serviceUrlResolver,
             IdentityEnvelopeService identityEnvelopeService,
             RestClient restClient,
             RequestTraceService requestTraceService) {
-        this.properties = properties;
+        this.serviceUrlResolver = serviceUrlResolver;
         this.identityEnvelopeService = identityEnvelopeService;
         this.restClient = restClient;
         this.requestTraceService = requestTraceService;
@@ -51,8 +54,8 @@ public class IngressController {
                 : requestBody.path("organizationId").asText("org-demo-001");
         String correlationId = UUID.randomUUID().toString();
         String inboundPath = "/deposit-offers/search";
-        String targetService = "deposit-offer-service";
-        String targetUrl = properties.depositOfferServiceUrl() + "/internal/v1/offers/search";
+        String targetService = DEPOSIT_OFFER_SERVICE;
+        String targetUrl = serviceUrlResolver.resolve(DEPOSIT_OFFER_SERVICE) + OFFERS_SEARCH_PATH;
 
         long started = System.currentTimeMillis();
         var trace = requestTraceService.start("ingress", "POST", inboundPath, targetService, targetUrl);
@@ -65,8 +68,8 @@ public class IngressController {
             String response = restClient.post()
                     .uri(targetUrl)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .header("X-Identity-Envelope", envelope)
-                    .header("X-Correlation-Id", correlationId)
+                    .header(DeliveryHeaders.IDENTITY_ENVELOPE, envelope)
+                    .header(DeliveryHeaders.CORRELATION_ID, correlationId)
                     .body(requestBody.toString())
                     .retrieve()
                     .body(String.class);
@@ -80,7 +83,7 @@ public class IngressController {
 
             return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                    .header("X-Correlation-Id", correlationId)
+                    .header(DeliveryHeaders.CORRELATION_ID, correlationId)
                     .body(response);
         } catch (RestClientResponseException ex) {
             requestTraceService.complete(

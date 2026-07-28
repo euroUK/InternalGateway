@@ -1,6 +1,8 @@
 package bank.internalgateway.gateway.messaging;
 
+import bank.internalgateway.gateway.config.GatewayProperties;
 import bank.internalgateway.gateway.dsl.DslLoader;
+import bank.internalgateway.gateway.dsl.DslMaps;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
 
@@ -21,12 +23,17 @@ public class ConsumeBindingRegistry {
     private static final Pattern TTL_PATTERN = Pattern.compile("(\\d+)([dhms])");
 
     private final DslLoader dslLoader;
+    private final Duration defaultDedupTtl;
 
     private Map<String, ConsumeBinding> bindingsById = Map.of();
     private Map<String, ConsumeBinding> bindingsByMappingFile = Map.of();
 
-    public ConsumeBindingRegistry(DslLoader dslLoader) {
+    public ConsumeBindingRegistry(DslLoader dslLoader, GatewayProperties properties) {
         this.dslLoader = dslLoader;
+        GatewayProperties.Dedup dedup = properties.dedup();
+        this.defaultDedupTtl = dedup != null && dedup.defaultTtl() != null
+                ? dedup.defaultTtl()
+                : Duration.ofDays(7);
     }
 
     @PostConstruct
@@ -171,10 +178,10 @@ public class ConsumeBindingRegistry {
         String mappingFile = normalization != null ? stringValue(normalization.get("mappingFile")) : null;
 
         Map<String, Object> deduplication = mapValue(bindingMap.get("deduplication"));
-        String dedupKey = deduplication != null ? stringValue(deduplication.get("key")) : "header://eventId";
+        String dedupKey = deduplication != null ? DslMaps.stringValue(deduplication.get("key")) : "header://eventId";
         Duration dedupTtl = deduplication != null
-                ? parseTtl(stringValue(deduplication.get("ttl")))
-                : Duration.ofDays(7);
+                ? parseTtl(DslMaps.stringValue(deduplication.get("ttl")), defaultDedupTtl)
+                : defaultDedupTtl;
 
         List<FanOutTarget> targets = parseFanOutTargets(mapValue(bindingMap.get("fanOut")));
 
@@ -224,7 +231,7 @@ public class ConsumeBindingRegistry {
             Map<String, String> pathByEventType = stringMap(delivery.get("pathByEventType"));
             String defaultPath = stringValue(delivery.get("path"));
 
-            List<String> envelopeClaims = parseEnvelopeClaims(delivery);
+            List<String> envelopeClaims = DslMaps.parseEnvelopeClaims(delivery);
             String resilienceProfile = stringValue(delivery.get("resilienceProfile"));
             String rateLimitProfile = stringValue(delivery.get("rateLimitProfile"));
             if (rateLimitProfile == null) {
@@ -264,25 +271,6 @@ public class ConsumeBindingRegistry {
     }
 
     @SuppressWarnings("unchecked")
-    private List<String> parseEnvelopeClaims(Map<String, Object> delivery) {
-        Map<String, Object> identityEnvelope = mapValue(delivery.get("identityEnvelope"));
-        if (identityEnvelope == null) {
-            return List.of();
-        }
-        Object claimsObj = identityEnvelope.get("claims");
-        if (!(claimsObj instanceof List<?> claims)) {
-            return List.of();
-        }
-        List<String> result = new ArrayList<>();
-        for (Object claim : claims) {
-            if (claim != null) {
-                result.add(claim.toString());
-            }
-        }
-        return List.copyOf(result);
-    }
-
-    @SuppressWarnings("unchecked")
     private Map<String, String> physicalTopicsByAlias() {
         Map<String, String> result = new LinkedHashMap<>();
         Object providerSetsObj = dslLoader.messagingModule().get("providerSets");
@@ -319,13 +307,22 @@ public class ConsumeBindingRegistry {
         return result;
     }
 
+    static Duration parseTtl(String ttl, Duration fallback) {
+        Duration parsed = parseTtl(ttl);
+        return parsed != null ? parsed : fallback;
+    }
+
     static Duration parseTtl(String ttl) {
         if (ttl == null || ttl.isBlank()) {
-            return Duration.ofDays(7);
+            return null;
+        }
+        Duration parsed = DslMaps.parseDuration(ttl);
+        if (parsed != null) {
+            return parsed;
         }
         Matcher matcher = TTL_PATTERN.matcher(ttl.trim());
         if (!matcher.matches()) {
-            return Duration.ofDays(7);
+            return null;
         }
         long amount = Long.parseLong(matcher.group(1));
         return switch (matcher.group(2)) {
@@ -333,7 +330,7 @@ public class ConsumeBindingRegistry {
             case "h" -> Duration.ofHours(amount);
             case "m" -> Duration.ofMinutes(amount);
             case "s" -> Duration.ofSeconds(amount);
-            default -> Duration.ofDays(7);
+            default -> null;
         };
     }
 

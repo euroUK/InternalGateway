@@ -1,0 +1,7 @@
+C:\Users\euroUK\InternalGateway\services\processor-mock\src\main\java\bank\internalgateway\processor\bootstrap\StartupSeed.java
+C:\Users\euroUK\InternalGateway\services\processor-mock\src\main\java\bank\internalgateway\processor\config\ProcessorConfig.java
+C:\Users\euroUK\InternalGateway\services\processor-mock\src\main\java\bank\internalgateway\processor\config\ProcessorProperties.java
+C:\Users\euroUK\InternalGateway\services\processor-mock\src\main\java\bank\internalgateway\processor\DepositProcessorApplication.java
+C:\Users\euroUK\InternalGateway\services\processor-mock\src\main\java\bank\internalgateway\processor\dto\ExternalProcessorOfferMessage.java
+C:\Users\euroUK\InternalGateway\services\processor-mock\src\main\java\bank\internalgateway\processor\kafka\ProcessorEventPublisher.java
+C:\Users\euroUK\InternalGateway\services\processor-mock\src\main\java\bank\internalgateway\processor\web\DemoController.java

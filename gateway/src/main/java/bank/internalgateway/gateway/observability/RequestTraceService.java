@@ -1,5 +1,6 @@
 package bank.internalgateway.gateway.observability;
 
+import bank.internalgateway.gateway.config.GatewayProperties;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -15,15 +16,21 @@ import java.util.stream.Collectors;
 @Service
 public class RequestTraceService {
 
-    private static final int MAX_ENTRIES = 500;
-
+    private final int maxEntries;
+    private final int topRoutesLimit;
     private final ConcurrentLinkedDeque<RequestTraceEntry> entries = new ConcurrentLinkedDeque<>();
     private final AtomicLong totalRecorded = new AtomicLong();
+
+    public RequestTraceService(GatewayProperties properties) {
+        GatewayProperties.Observability observability = properties.observability();
+        this.maxEntries = observability != null ? observability.traceBufferSize() : 500;
+        this.topRoutesLimit = observability != null ? observability.topRoutesLimit() : 10;
+    }
 
     public void record(RequestTraceEntry entry) {
         entries.addFirst(entry);
         totalRecorded.incrementAndGet();
-        while (entries.size() > MAX_ENTRIES) {
+        while (entries.size() > maxEntries) {
             entries.pollLast();
         }
     }
@@ -86,7 +93,7 @@ public class RequestTraceService {
     }
 
     public List<RequestTraceEntry> recent(int limit) {
-        int safeLimit = Math.max(1, Math.min(limit, MAX_ENTRIES));
+        int safeLimit = Math.max(1, Math.min(limit, maxEntries));
         return entries.stream().limit(safeLimit).toList();
     }
 
@@ -107,7 +114,7 @@ public class RequestTraceService {
 
         List<RouteStat> topRoutes = byRoute.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-                .limit(10)
+                .limit(topRoutesLimit)
                 .map(e -> new RouteStat(e.getKey(), e.getValue()))
                 .toList();
 

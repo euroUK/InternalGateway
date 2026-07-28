@@ -2,11 +2,13 @@ package bank.internalgateway.gateway.resilience;
 
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.time.Duration;
 import java.util.function.Consumer;
 
 @Component
@@ -39,17 +41,18 @@ public class ResilienceDeliveryExecutor {
         while (attempt < profile.maxAttempts()) {
             attempt++;
             try {
-                RestClient.RequestBodySpec request = restClient.method(HttpMethod.valueOf(method))
+                RestClient client = clientForProfile(profile);
+                RestClient.RequestBodySpec request = client.method(HttpMethod.valueOf(method))
                         .uri(targetUrl)
                         .contentType(MediaType.APPLICATION_JSON);
                 if (requestCustomizer != null) {
                     requestCustomizer.accept(request);
                 }
-                request.body(payloadJson).retrieve().toBodilessEntity();
+                var response = request.body(payloadJson).retrieve().toBodilessEntity();
                 if (attempt > 1) {
                     metricsService.recordRetrySuccess();
                 }
-                return new DeliveryResult(true, attempt, null, null);
+                return new DeliveryResult(true, attempt, response.getStatusCode().value(), null);
             } catch (RestClientResponseException ex) {
                 lastError = ex;
                 if (profile.shouldRetry(attempt, ex.getStatusCode().value(), false)) {
@@ -80,6 +83,18 @@ public class ResilienceDeliveryExecutor {
                     responseException.getResponseBodyAsString());
         }
         return new DeliveryResult(false, attempt, null, lastError != null ? lastError.getMessage() : "delivery failed");
+    }
+
+    private RestClient clientForProfile(ResilienceProfile profile) {
+        Duration timeout = profile.timeout();
+        if (timeout == null) {
+            return restClient;
+        }
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        int timeoutMs = (int) Math.min(timeout.toMillis(), Integer.MAX_VALUE);
+        requestFactory.setConnectTimeout(timeoutMs);
+        requestFactory.setReadTimeout(timeoutMs);
+        return RestClient.builder().requestFactory(requestFactory).build();
     }
 
     private void sleep(long millis) {

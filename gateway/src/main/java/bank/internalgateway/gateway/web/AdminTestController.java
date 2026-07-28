@@ -1,5 +1,6 @@
 package bank.internalgateway.gateway.web;
 
+import bank.internalgateway.gateway.config.GatewayProperties;
 import bank.internalgateway.gateway.test.TestProcessorRegistry;
 import bank.internalgateway.gateway.test.TestScenarioService;
 import org.springframework.http.ResponseEntity;
@@ -18,9 +19,13 @@ import java.util.Map;
 public class AdminTestController {
 
     private final TestScenarioService testScenarioService;
+    private final String defaultBindingId;
 
-    public AdminTestController(TestScenarioService testScenarioService) {
+    public AdminTestController(TestScenarioService testScenarioService, GatewayProperties properties) {
         this.testScenarioService = testScenarioService;
+        this.defaultBindingId = properties.testHarness() != null && properties.testHarness().defaultBindingId() != null
+                ? properties.testHarness().defaultBindingId()
+                : "test-processor-offer-lifecycle";
     }
 
     @GetMapping("/processors")
@@ -41,21 +46,25 @@ public class AdminTestController {
 
     @PostMapping("/scenarios/dedup")
     public ResponseEntity<Map<String, Object>> runDedup(
-            @RequestParam(defaultValue = "test-processor-offer-lifecycle") String bindingId) throws Exception {
-        return ResponseEntity.ok(testScenarioService.runDedupScenario(bindingId));
+            @RequestParam(required = false) String bindingId) throws Exception {
+        return ResponseEntity.ok(testScenarioService.runDedupScenario(resolveBindingId(bindingId)));
     }
 
     @PostMapping("/scenarios/retry")
     public ResponseEntity<Map<String, Object>> runRetry(
-            @RequestParam(defaultValue = "test-processor-offer-lifecycle") String bindingId,
+            @RequestParam(required = false) String bindingId,
             @RequestParam(defaultValue = "2") int failCount) {
-        return ResponseEntity.ok(testScenarioService.runRetryScenario(bindingId, failCount));
+        return ResponseEntity.ok(testScenarioService.runRetryScenario(resolveBindingId(bindingId), failCount));
     }
 
     @PostMapping("/scenarios/rate-limit")
     public ResponseEntity<Map<String, Object>> runRateLimit(
-            @RequestParam(defaultValue = "test-processor-offer-lifecycle") String bindingId,
+            @RequestParam(required = false) String bindingId,
             @RequestParam(defaultValue = "6") int burstCount) {
-        return ResponseEntity.ok(testScenarioService.runRateLimitScenario(bindingId, burstCount));
+        return ResponseEntity.ok(testScenarioService.runRateLimitScenario(resolveBindingId(bindingId), burstCount));
+    }
+
+    private String resolveBindingId(String bindingId) {
+        return bindingId != null && !bindingId.isBlank() ? bindingId : defaultBindingId;
     }
 }

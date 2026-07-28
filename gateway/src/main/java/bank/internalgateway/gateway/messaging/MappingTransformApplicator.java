@@ -8,6 +8,8 @@ import java.math.RoundingMode;
 @Component
 public class MappingTransformApplicator {
 
+    private static final int DEFAULT_PERCENT_SCALE = 6;
+
     public Object apply(Object value, EventMappingModels.TransformRule transform) {
         if (value == null) {
             return null;
@@ -16,15 +18,16 @@ public class MappingTransformApplicator {
             return value;
         }
         return switch (transform.rule()) {
-            case "percent-to-decimal" -> percentToDecimal(value);
+            case "percent-to-decimal" -> percentToDecimal(value, transform.scale());
             case "identity" -> value;
             default -> throw new IllegalArgumentException("Unsupported mapping transform rule: " + transform.rule());
         };
     }
 
-    private BigDecimal percentToDecimal(Object value) {
+    private BigDecimal percentToDecimal(Object value, Integer scale) {
+        int effectiveScale = scale != null ? scale : DEFAULT_PERCENT_SCALE;
         BigDecimal decimal = toBigDecimal(value);
-        return decimal.divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP);
+        return decimal.divide(BigDecimal.valueOf(100), effectiveScale, RoundingMode.HALF_UP);
     }
 
     private BigDecimal toBigDecimal(Object value) {

@@ -10,6 +10,7 @@ bank\internalgateway\offers\web\ProcessorEventController.class
 bank\internalgateway\offers\test\TestFaultFilter.class
 bank\internalgateway\offers\domain\ProcessorOfferCatalogEntry.class
 bank\internalgateway\offers\test\TestFaultState.class
+bank\internalgateway\offers\config\OfferServiceProperties$Fault.class
 bank\internalgateway\offers\domain\DepositProductRepository.class
 bank\internalgateway\offers\dto\SearchOffersRequest.class
 bank\internalgateway\offers\test\TestFaultController$FaultConfig.class

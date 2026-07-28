@@ -13,8 +13,7 @@
     <modules>
         <module>gateway</module>
         <module>services/deposit-offer-service</module>
-        <module>services/deposit-processor</module>
-        <module>services/test-processor</module>
+        <module>services/processor-mock</module>
     </modules>
 
     <properties>

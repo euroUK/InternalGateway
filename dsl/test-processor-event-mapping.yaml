@@ -27,6 +27,7 @@ transforms:
   rate:
     from: interestRatePercent
     rule: percent-to-decimal
+    scale: 6
     description: "12.5 (проц.) → 0.125 (decimal)"
 
 legacyDetection:

@@ -8,8 +8,6 @@ import java.util.Map;
 @Component
 public class ServiceUrlResolver {
 
-    private static final String DEPOSIT_OFFER_SERVICE = "deposit-offer-service";
-
     private final Map<String, String> serviceUrls;
 
     public ServiceUrlResolver(GatewayProperties properties) {
@@ -38,9 +36,6 @@ public class ServiceUrlResolver {
                     urls.put(name, url);
                 }
             });
-        }
-        if (!urls.containsKey(DEPOSIT_OFFER_SERVICE) && properties.depositOfferServiceUrl() != null) {
-            urls.put(DEPOSIT_OFFER_SERVICE, properties.depositOfferServiceUrl());
         }
         return urls;
     }

@@ -1,0 +1,13 @@
+bank\internalgateway\processor\dto\ExternalProcessorOfferMessage$AmountRange.class
+bank\internalgateway\processor\web\DemoController.class
+bank\internalgateway\processor\config\ProcessorConfig$1.class
+bank\internalgateway\processor\bootstrap\StartupSeed.class
+bank\internalgateway\processor\config\ProcessorProperties.class
+bank\internalgateway\processor\config\ProcessorProperties$Cors.class
+bank\internalgateway\processor\config\ProcessorProperties$Seed.class
+bank\internalgateway\processor\config\ProcessorConfig.class
+bank\internalgateway\processor\kafka\ProcessorEventPublisher.class
+bank\internalgateway\processor\DepositProcessorApplication.class
+bank\internalgateway\processor\web\DemoController$DemoPublishRequest.class
+bank\internalgateway\processor\dto\ExternalProcessorOfferMessage.class
+bank\internalgateway\processor\config\ProcessorProperties$Kafka.class

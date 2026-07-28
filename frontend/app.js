@@ -12,9 +12,9 @@ searchForm.addEventListener("submit", async (event) => {
     await runSearch();
 });
 
-document.getElementById("btn-created").addEventListener("click", () => publishProcessorEvent("DepositOfferCreated", true));
-document.getElementById("btn-updated").addEventListener("click", () => publishProcessorEvent("DepositOfferUpdated", false));
-document.getElementById("btn-closed").addEventListener("click", () => publishProcessorEvent("DepositOfferClosed", false));
+document.getElementById("btn-created").addEventListener("click", () => publishProcessorEvent("DepositOfferCreated"));
+document.getElementById("btn-updated").addEventListener("click", () => publishProcessorEvent("DepositOfferUpdated"));
+document.getElementById("btn-closed").addEventListener("click", () => publishProcessorEvent("DepositOfferClosed"));
 
 async function runSearch() {
     searchStatus.textContent = "Запрос через Internal Gateway...";
@@ -83,11 +83,17 @@ function renderResults(data) {
     `;
 }
 
-async function publishProcessorEvent(eventType, incrementVersion) {
-    if (incrementVersion) {
-        demoVersion = 1;
-    } else if (eventType === "DepositOfferUpdated") {
-        demoVersion += 1;
+async function publishProcessorEvent(eventType) {
+    switch (eventType) {
+        case "DepositOfferCreated":
+            demoVersion = 1;
+            break;
+        case "DepositOfferUpdated":
+        case "DepositOfferClosed":
+            demoVersion += 1;
+            break;
+        default:
+            break;
     }
 
     const payload = {

@@ -1,6 +1,7 @@
 package bank.internalgateway.gateway.messaging;
 
 import bank.internalgateway.gateway.config.GatewayProperties;
+import bank.internalgateway.gateway.dsl.DslMaps;
 import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
@@ -110,15 +111,15 @@ public class EventMappingRegistry {
             if (!(loaded instanceof Map<?, ?> root)) {
                 return null;
             }
-            Map<String, String> headerMapping = stringMap(root.get("headerMapping"));
-            Map<String, String> eventTypeMapping = stringMap(root.get("eventTypeMapping"));
-            Map<String, String> bodyFieldMapping = stringMap(root.get("bodyFieldMapping"));
+            Map<String, String> headerMapping = DslMaps.stringMap(root.get("headerMapping"));
+            Map<String, String> eventTypeMapping = DslMaps.stringMap(root.get("eventTypeMapping"));
+            Map<String, String> bodyFieldMapping = DslMaps.stringMap(root.get("bodyFieldMapping"));
             Map<String, EventMappingModels.TransformRule> transforms = parseTransforms(root.get("transforms"));
             EventMappingModels.LegacyDetection legacyDetection = parseLegacyDetection(root.get("legacyDetection"));
 
             return new ParsedEventMapping(
-                    stringValue(root.get("sourceSystem")),
-                    stringValue(root.get("description")),
+                    DslMaps.stringValue(root.get("sourceSystem")),
+                    DslMaps.stringValue(root.get("description")),
                     headerMapping,
                     eventTypeMapping,
                     bodyFieldMapping,
@@ -138,9 +139,10 @@ public class EventMappingRegistry {
         transforms.forEach((targetField, value) -> {
             if (value instanceof Map<?, ?> ruleMap) {
                 result.put(String.valueOf(targetField), new EventMappingModels.TransformRule(
-                        stringValue(ruleMap.get("rule")),
-                        stringValue(ruleMap.get("from")),
-                        stringValue(ruleMap.get("description"))
+                        DslMaps.stringValue(ruleMap.get("rule")),
+                        DslMaps.stringValue(ruleMap.get("from")),
+                        DslMaps.stringValue(ruleMap.get("description")),
+                        ruleMap.get("scale") != null ? Integer.parseInt(ruleMap.get("scale").toString()) : null
                 ));
             }
         });
@@ -153,8 +155,8 @@ public class EventMappingRegistry {
             return null;
         }
         return new EventMappingModels.LegacyDetection(
-                stringList(legacyMap.get("headersPresent")),
-                stringList(legacyMap.get("headersAbsent"))
+                DslMaps.stringList(legacyMap.get("headersPresent")),
+                DslMaps.stringList(legacyMap.get("headersAbsent"))
         );
     }
 
@@ -177,35 +179,8 @@ public class EventMappingRegistry {
         return views;
     }
 
-    private List<String> stringList(Object value) {
-        if (!(value instanceof List<?> list)) {
-            return List.of();
-        }
-        List<String> result = new ArrayList<>();
-        for (Object item : list) {
-            if (item != null) {
-                result.add(item.toString());
-            }
-        }
-        return List.copyOf(result);
-    }
-
     private String mappingId(String configFile) {
         return configFile.replace("-event-mapping.yaml", "");
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, String> stringMap(Object value) {
-        if (!(value instanceof Map<?, ?> map)) {
-            return Map.of();
-        }
-        Map<String, String> result = new LinkedHashMap<>();
-        map.forEach((k, v) -> result.put(String.valueOf(k), v != null ? v.toString() : null));
-        return result;
-    }
-
-    private String stringValue(Object value) {
-        return value != null ? value.toString() : "";
     }
 
     public record ParsedEventMapping(

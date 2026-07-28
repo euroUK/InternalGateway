@@ -1,5 +1,6 @@
 package bank.internalgateway.gateway.resilience;
 
+import java.time.Duration;
 import java.util.List;
 
 public record ResilienceProfile(
@@ -7,15 +8,25 @@ public record ResilienceProfile(
         int maxAttempts,
         List<String> retryOn,
         List<String> doNotRetryOn,
-        String backoff
+        String backoff,
+        Duration timeout,
+        CircuitBreakerConfig circuitBreaker,
+        DeadLetterConfig deadLetter,
+        long backoffBaseMs,
+        long backoffJitterMs
 ) {
-    public static ResilienceProfile defaults(String name) {
+    public static ResilienceProfile minimal(String name, long backoffBaseMs, long backoffJitterMs) {
         return new ResilienceProfile(
                 name,
                 1,
-                List.of("http-502", "http-503", "http-504", "connect-timeout"),
-                List.of("http-409", "http-422"),
-                "exponential-jitter"
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null,
+                backoffBaseMs,
+                backoffJitterMs
         );
     }
 
@@ -24,10 +35,10 @@ public record ResilienceProfile(
             return false;
         }
         String signal = connectFailure ? "connect-timeout" : "http-" + statusCode;
-        if (doNotRetryOn.stream().anyMatch(signal::equals)) {
+        if (doNotRetryOn != null && doNotRetryOn.stream().anyMatch(signal::equals)) {
             return false;
         }
-        if (retryOn.isEmpty()) {
+        if (retryOn == null || retryOn.isEmpty()) {
             return statusCode >= 500 || connectFailure;
         }
         return retryOn.stream().anyMatch(signal::equals);
@@ -35,10 +46,10 @@ public record ResilienceProfile(
 
     public long backoffMillis(int attempt) {
         long base = switch (backoff != null ? backoff : "") {
-            case "exponential-jitter" -> (long) Math.pow(2, attempt - 1) * 100L;
-            default -> 100L;
+            case "exponential-jitter" -> (long) Math.pow(2, attempt - 1) * backoffBaseMs;
+            default -> backoffBaseMs;
         };
-        long jitter = (long) (Math.random() * 50);
+        long jitter = (long) (Math.random() * backoffJitterMs);
         return base + jitter;
     }
 }

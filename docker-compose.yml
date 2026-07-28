@@ -48,13 +48,16 @@ services:
   deposit-processor:
     build:
       context: .
-      dockerfile: services/deposit-processor/Dockerfile
+      dockerfile: services/processor-mock/Dockerfile
     container_name: poc-deposit-processor
     networks:
       - front-system
     ports:
       - "8091:8091"
     environment:
+      SERVER_PORT: 8091
+      PROCESSOR_APPLICATION_NAME: deposit-processor
+      PROCESSOR_SEED_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_PROCESSOR_TOPIC: deposit.processor.offer.lifecycle.v1
       PROCESSOR_CORS_ALLOWED_ORIGINS: http://localhost:3000
@@ -71,13 +74,16 @@ services:
   test-processor:
     build:
       context: .
-      dockerfile: services/test-processor/Dockerfile
+      dockerfile: services/processor-mock/Dockerfile
     container_name: poc-test-processor
     networks:
       - front-system
     ports:
       - "8092:8092"
     environment:
+      SERVER_PORT: 8092
+      PROCESSOR_APPLICATION_NAME: test-processor
+      PROCESSOR_SEED_ENABLED: "false"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_PROCESSOR_TOPIC: test.processor.offer.lifecycle.v1
       PROCESSOR_CORS_ALLOWED_ORIGINS: http://localhost:3000
@@ -105,10 +111,8 @@ services:
     environment:
       GATEWAY_DSL_PATH: /config/dsl
       DEPOSIT_OFFER_SERVICE_URL: http://deposit-offer-service:8090
+      TEST_PROCESSOR_URL: http://test-processor:8092
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      KAFKA_PROCESSOR_TOPIC: deposit.processor.offer.lifecycle.v1
-      KAFKA_CONSUMER_GROUP: internal-gateway.front-system.deposit-processor-offers
-      KAFKA_ACTIVE_BINDING_ID: deposit-processor-offer-lifecycle
       GATEWAY_CORS_ALLOWED_ORIGINS: http://localhost:3000
       GATEWAY_ENVELOPE_SECRET: poc-envelope-secret-min-32-chars!!
     depends_on:

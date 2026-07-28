@@ -1,33 +1,50 @@
 package bank.internalgateway.gateway.test;
 
+import bank.internalgateway.gateway.config.GatewayProperties;
+import bank.internalgateway.gateway.config.ServiceUrlResolver;
 import bank.internalgateway.gateway.messaging.ConsumeBindingRegistry;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Component
 public class TestProcessorRegistry {
 
+    private static final String TEST_PROCESSOR_SERVICE = "test-processor";
+    private static final String DEFAULT_TEST_BINDING = "test-processor-offer-lifecycle";
+
     private final ConsumeBindingRegistry consumeBindingRegistry;
+    private final ServiceUrlResolver serviceUrlResolver;
+    private final GatewayProperties properties;
     private final CopyOnWriteArrayList<TestProcessorRegistration> registrations = new CopyOnWriteArrayList<>();
 
-    public TestProcessorRegistry(ConsumeBindingRegistry consumeBindingRegistry) {
+    public TestProcessorRegistry(
+            ConsumeBindingRegistry consumeBindingRegistry,
+            ServiceUrlResolver serviceUrlResolver,
+            GatewayProperties properties) {
         this.consumeBindingRegistry = consumeBindingRegistry;
+        this.serviceUrlResolver = serviceUrlResolver;
+        this.properties = properties;
     }
 
     @PostConstruct
     void registerBuiltInTestProcessor() {
+        String bindingId = properties.testHarness() != null && properties.testHarness().defaultBindingId() != null
+                ? properties.testHarness().defaultBindingId()
+                : DEFAULT_TEST_BINDING;
+        ConsumeBindingRegistry.ConsumeBinding binding = consumeBindingRegistry.findById(bindingId)
+                .orElseThrow(() -> new IllegalStateException("Test harness binding not found in DSL: " + bindingId));
+
         register(new TestProcessorRegistration(
                 "test-processor-1",
-                "test-processor-offer-lifecycle",
-                "test-processor-event-mapping.yaml",
-                "test.processor.offer.lifecycle.v1",
-                "http://test-processor:8092",
-                "Registered from DSL binding test-processor-offer-lifecycle"
+                binding.bindingId(),
+                binding.mappingFile(),
+                binding.physicalTopic(),
+                serviceUrlResolver.resolve(TEST_PROCESSOR_SERVICE),
+                "Registered from DSL binding " + binding.bindingId()
         ));
     }
 

@@ -1,0 +1,30 @@
+server:
+  port: ${SERVER_PORT:8091}
+
+spring:
+  application:
+    name: ${PROCESSOR_APPLICATION_NAME:processor-mock}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+
+processor:
+  seed:
+    enabled: ${PROCESSOR_SEED_ENABLED:true}
+  cors:
+    allowed-origins: ${PROCESSOR_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  kafka:
+    topic: ${KAFKA_PROCESSOR_TOPIC:deposit.processor.offer.lifecycle.v1}
+    schema-version: ${PROCESSOR_SCHEMA_VERSION:processor-v2}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
