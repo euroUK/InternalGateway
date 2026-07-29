@@ -34,6 +34,7 @@ services:
     networks:
       - front-system
     environment:
+      SERVER_PORT: 8090
       GATEWAY_URL: http://gateway:8080
       H2_DATABASE_PATH: /data/offers
     volumes:
@@ -111,6 +112,7 @@ services:
     environment:
       GATEWAY_DSL_PATH: /config/dsl
       DEPOSIT_OFFER_SERVICE_URL: http://deposit-offer-service:8090
+      GATEWAY_SELF_BASE_URL: http://127.0.0.1:8080
       TEST_PROCESSOR_URL: http://test-processor:8092
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       GATEWAY_CORS_ALLOWED_ORIGINS: http://localhost:3000
@@ -144,9 +146,213 @@ services:
       deposit-processor:
         condition: service_healthy
 
+  # Load generator for RPS / latency overhead measurements.
+  # Usage:
+  #   docker compose --profile benchmark run --rm k6
+  #   docker compose --profile benchmark run --rm -e PROFILE=smoke k6
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: ["benchmark"]
+    container_name: poc-k6
+    networks:
+      - front-system
+    volumes:
+      - ./scripts/benchmark:/scripts:ro
+      - ./scripts/benchmark/results:/results
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      BACKEND_URL: http://deposit-offer-service:8090
+      GATEWAY_LABEL: ${GATEWAY_LABEL:-internal-gateway-poc}
+      SUMMARY_FILE: ${SUMMARY_FILE:-/results/summary-custom.json}
+      PROFILE: ${PROFILE:-stages}
+      INCLUDE_CAPABILITY: ${INCLUDE_CAPABILITY:-false}
+      THINK_TIME_MS: ${THINK_TIME_MS:-0}
+      P95_THRESHOLD_MS: ${P95_THRESHOLD_MS:-2000}
+      ERROR_RATE_THRESHOLD: ${ERROR_RATE_THRESHOLD:-0.01}
+      # Optional overrides for smoke/custom; omit so script defaults apply when unset
+      VUS: ${VUS:-}
+      DURATION: ${DURATION:-}
+    depends_on:
+      gateway:
+        condition: service_healthy
+      deposit-offer-service:
+        condition: service_healthy
+    entrypoint: ["k6", "run"]
+    command: ["/scripts/search-rps.js"]
+
+  # Isolated Spring Cloud Gateway WebFlux contour for A/B RPS comparison.
+  # Usage:
+  #   docker compose --profile scg-benchmark up -d deposit-offer-service-scg scg-gateway
+  #   docker compose --profile scg-benchmark run --rm -e PROFILE=smoke k6-scg
+  deposit-offer-service-scg:
+    profiles: ["scg-benchmark"]
+    build:
+      context: .
+      dockerfile: services/deposit-offer-service/Dockerfile
+    container_name: poc-deposit-offer-service-scg
+    networks:
+      - front-system
+    environment:
+      SERVER_PORT: 8090
+      GATEWAY_URL: http://scg-gateway:8081
+      H2_DATABASE_PATH: /data/offers-scg
+    volumes:
+      - offer-service-scg-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  scg-gateway:
+    profiles: ["scg-benchmark"]
+    build:
+      context: .
+      dockerfile: scg-gateway/Dockerfile
+    container_name: poc-scg-gateway
+    networks:
+      - front-system
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./dsl:/config/dsl:ro
+    environment:
+      SERVER_PORT: 8081
+      GATEWAY_DSL_PATH: /config/dsl
+      DEPOSIT_OFFER_SERVICE_URL: http://deposit-offer-service-scg:8090
+      GATEWAY_SELF_BASE_URL: http://127.0.0.1:8081
+      GATEWAY_ENVELOPE_SECRET: poc-envelope-secret-min-32-chars!!
+    depends_on:
+      deposit-offer-service-scg:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 50s
+
+  k6-scg:
+    image: grafana/k6:0.54.0
+    profiles: ["scg-benchmark"]
+    container_name: poc-k6-scg
+    networks:
+      - front-system
+    volumes:
+      - ./scripts/benchmark:/scripts:ro
+      - ./scripts/benchmark/results:/results
+    environment:
+      GATEWAY_URL: http://scg-gateway:8081
+      BACKEND_URL: http://deposit-offer-service-scg:8090
+      GATEWAY_LABEL: ${GATEWAY_LABEL:-spring-cloud-gateway-webflux}
+      SUMMARY_FILE: ${SUMMARY_FILE:-/results/summary-scg.json}
+      PROFILE: ${PROFILE:-stages}
+      INCLUDE_CAPABILITY: ${INCLUDE_CAPABILITY:-false}
+      THINK_TIME_MS: ${THINK_TIME_MS:-0}
+      P95_THRESHOLD_MS: ${P95_THRESHOLD_MS:-2000}
+      ERROR_RATE_THRESHOLD: ${ERROR_RATE_THRESHOLD:-0.01}
+      VUS: ${VUS:-}
+      DURATION: ${DURATION:-}
+    depends_on:
+      scg-gateway:
+        condition: service_healthy
+      deposit-offer-service-scg:
+        condition: service_healthy
+    entrypoint: ["k6", "run"]
+    command: ["/scripts/search-rps.js"]
+
+  # Isolated ASP.NET Core 10 contour for A/B vs Java PoC.
+  # Usage:
+  #   docker compose --profile dotnet-benchmark up -d kafka deposit-offer-service-dotnet dotnet-gateway
+  #   docker compose --profile dotnet-benchmark run --rm -e PROFILE=smoke k6-dotnet
+  deposit-offer-service-dotnet:
+    profiles: ["dotnet-benchmark"]
+    build:
+      context: .
+      dockerfile: services/deposit-offer-service/Dockerfile
+    container_name: poc-deposit-offer-service-dotnet
+    networks:
+      - front-system
+    environment:
+      SERVER_PORT: 8090
+      GATEWAY_URL: http://dotnet-gateway:8082
+      H2_DATABASE_PATH: /data/offers-dotnet
+    volumes:
+      - offer-service-dotnet-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  dotnet-gateway:
+    profiles: ["dotnet-benchmark"]
+    build:
+      context: .
+      dockerfile: dotnet-gateway/Dockerfile
+    container_name: poc-dotnet-gateway
+    networks:
+      - front-system
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./dsl:/config/dsl:ro
+    environment:
+      SERVER_PORT: 8082
+      ASPNETCORE_URLS: http://0.0.0.0:8082
+      GATEWAY_DSL_PATH: /config/dsl
+      DEPOSIT_OFFER_SERVICE_URL: http://deposit-offer-service-dotnet:8090
+      GATEWAY_SELF_BASE_URL: http://127.0.0.1:8082
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      GATEWAY_ENVELOPE_SECRET: poc-envelope-secret-min-32-chars!!
+    depends_on:
+      kafka:
+        condition: service_healthy
+      deposit-offer-service-dotnet:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health | grep -qi healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  k6-dotnet:
+    image: grafana/k6:0.54.0
+    profiles: ["dotnet-benchmark"]
+    container_name: poc-k6-dotnet
+    networks:
+      - front-system
+    volumes:
+      - ./scripts/benchmark:/scripts:ro
+      - ./scripts/benchmark/results:/results
+    environment:
+      GATEWAY_URL: http://dotnet-gateway:8082
+      BACKEND_URL: http://deposit-offer-service-dotnet:8090
+      GATEWAY_LABEL: ${GATEWAY_LABEL:-dotnet-aspnet-core}
+      SUMMARY_FILE: ${SUMMARY_FILE:-/results/summary-dotnet.json}
+      PROFILE: ${PROFILE:-stages}
+      INCLUDE_CAPABILITY: ${INCLUDE_CAPABILITY:-false}
+      THINK_TIME_MS: ${THINK_TIME_MS:-0}
+      P95_THRESHOLD_MS: ${P95_THRESHOLD_MS:-2000}
+      ERROR_RATE_THRESHOLD: ${ERROR_RATE_THRESHOLD:-0.01}
+      VUS: ${VUS:-}
+      DURATION: ${DURATION:-}
+    depends_on:
+      dotnet-gateway:
+        condition: service_healthy
+      deposit-offer-service-dotnet:
+        condition: service_healthy
+    entrypoint: ["k6", "run"]
+    command: ["/scripts/search-rps.js"]
+
 networks:
   front-system:
     name: front-system
 
 volumes:
   offer-service-data:
+  offer-service-scg-data:
+  offer-service-dotnet-data:

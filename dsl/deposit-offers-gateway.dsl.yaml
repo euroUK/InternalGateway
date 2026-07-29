@@ -1,0 +1,105 @@
+# Benchmark / PoC HTTP plane for deposit offers search.
+# Source of truth for Custom Gateway and Spring Cloud Gateway WebFlux.
+apiVersion: bank.internal-gateway/v1alpha1
+kind: ProductModule
+
+metadata:
+  name: deposit-offers
+  version: 1.0.0
+  owner: deposit-front-team
+  system: front-product-system
+  description: Ingress search route and capability stubs for deposit offers PoC
+
+deployment:
+  hotReload: true
+  rollbackToLastKnownGood: true
+
+identity:
+  acceptedContexts:
+    bankUser:
+      issuer: bank-api-gateway
+      authentication: signed-jwt
+  forwardedEnvelope:
+    issuer: internal-gateway
+    ttl: 30s
+    claims:
+      - subjectId
+      - organizationId
+      - correlationId
+      - operationId
+      - businessControlEvidenceId
+
+routes:
+  - id: search-deposit-offers
+    exposure: bank-ingress
+    request:
+      method: POST
+      path: /deposit-offers/search
+      idempotency:
+        safe: true
+    identityContext: bankUser
+    validation:
+      businessControl:
+        effect: stub
+        evidenceId: poc-stub-passed
+    target:
+      service: deposit-offer-service
+      method: POST
+      path: /internal/v1/offers/search
+
+  - id: enriched-deposit-offers
+    exposure: bank-ingress
+    request:
+      method: POST
+      path: /deposit-offers/enriched
+      idempotency:
+        safe: true
+    identityContext: bankUser
+    validation:
+      businessControl:
+        effect: stub
+        evidenceId: poc-stub-passed
+    adapter:
+      capability: organization-display-info
+    target:
+      service: deposit-offer-service
+      method: POST
+      path: /internal/v1/offers/fixed
+    responseMapping:
+      organizationId: request.organizationId
+      organizationDisplayName: adapter.displayName
+      accountId: request.accountId
+      amount: request.amount
+      termMonths: request.termMonths
+      offer: target
+      correlationId: envelope.correlationId
+
+capabilities:
+  - id: account-deposit-context
+    exposure: internal
+    request:
+      method: GET
+      path: /internal/capabilities/accounts/{accountId}/deposit-context
+    executionMode: static-stub
+    responseTemplate:
+      accountId: "{accountId}"
+      currency: "RUB"
+      availableBalance: 1500000.00
+      debitAllowed: true
+      organizationId: "org-demo-001"
+      snapshotAt: "{now}"
+    targetService: account-context-provider
+    targetUrl: stub://account-lite-or-core
+
+  - id: organization-display-info
+    exposure: internal
+    request:
+      method: GET
+      path: /internal/capabilities/organizations/{organizationId}/display-info
+    executionMode: static-stub
+    responseTemplate:
+      organizationId: "{organizationId}"
+      displayName: "Demo Organization LLC"
+      legalForm: "LLC"
+    targetService: organization-directory-provider
+    targetUrl: stub://organization-lite-or-core

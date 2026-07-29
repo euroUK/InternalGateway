@@ -1,0 +1,10 @@
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\config\BenchmarkDslConfiguration.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\config\DslRouteDefinitionLocator.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\config\ScgGatewayProperties.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\filter\BenchmarkIngressGatewayFilterFactory.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\filter\EnrichedDepositGatewayFilterFactory.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\identity\IdentityEnvelopeService.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\observability\RequestTraceService.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\ScgGatewayApplication.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\web\AdminController.java
+C:\Work\InternalGateway\scg-gateway\src\main\java\bank\internalgateway\scg\web\CapabilityController.java

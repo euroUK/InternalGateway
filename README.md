@@ -9,7 +9,9 @@ InternalGateway/
 ├── README.md
 ├── docker-compose.yml
 ├── pom.xml
-├── gateway/                         # Internal Gateway (Java)
+├── gateway/                         # Internal Gateway (Java, MVC)
+├── scg-gateway/                     # Spring Cloud Gateway WebFlux (A/B benchmark)
+├── dotnet-gateway/                  # ASP.NET Core 10 gateway (A/B benchmark)
 ├── services/
 │   ├── deposit-offer-service/       # Бэкенд депозитов (Java)
 │   └── deposit-processor/           # Mock процессора депозитов (Java)
@@ -64,6 +66,29 @@ docker compose down
 6. В секции «Processor sync demo» нажать **Publish Created** для нового offer, затем повторить search — offer появляется.
 7. Нажать **Publish Closed** — offer исчезает из результатов search.
 8. `docker compose restart deposit-offer-service` — каталог сохраняется в volume `offer-service-data`.
+
+## Benchmark RPS / latency overhead
+
+Сравнение throughput и оверхеда gateway относительно прямого вызова backend
+(кастомный gateway vs Spring Cloud Gateway WebFlux):
+
+```bash
+docker compose up -d
+docker compose --profile benchmark run --rm -e PROFILE=smoke k6
+
+# Isolated SCG contour (port 8081 + dedicated backend)
+docker compose --profile scg-benchmark up -d deposit-offer-service-scg scg-gateway
+docker compose --profile scg-benchmark run --rm -e PROFILE=smoke k6-scg
+
+# Isolated .NET 10 contour (port 8082 + dedicated backend + Kafka fan-out)
+docker compose --profile dotnet-benchmark up -d kafka deposit-offer-service-dotnet dotnet-gateway
+docker compose --profile dotnet-benchmark run --rm -e PROFILE=smoke k6-dotnet
+```
+
+Подробности, переменные окружения и формат отчёта:
+[scripts/benchmark/README.md](scripts/benchmark/README.md).
+Модуль SCG: [scg-gateway](scg-gateway).
+Модуль .NET: [dotnet-gateway](dotnet-gateway).
 
 ## С чего начать (архитектура)
 

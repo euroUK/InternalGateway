@@ -12,6 +12,7 @@ public record GatewayProperties(
         String envelopeSecret,
         String corsAllowedOrigins,
         Map<String, String> services,
+        String selfBaseUrl,
         Envelope envelope,
         Dedup dedup,
         Resilience resilience,

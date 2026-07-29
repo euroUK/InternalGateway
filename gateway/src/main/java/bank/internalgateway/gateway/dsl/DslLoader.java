@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.Yaml;
 
+import bank.internalgateway.dsl.BenchmarkModuleCompiler;
 import bank.internalgateway.gateway.config.GatewayProperties;
 
 import java.io.IOException;
@@ -21,6 +22,7 @@ public class DslLoader {
     private final GatewayProperties properties;
     private Map<String, Object> openingModule;
     private Map<String, Object> messagingModule;
+    private Map<String, Object> offersModule;
 
     public DslLoader(GatewayProperties properties) {
         this.properties = properties;
@@ -31,6 +33,7 @@ public class DslLoader {
         Path dslDir = Path.of(properties.dslPath());
         openingModule = loadYaml(dslDir.resolve("deposit-opening-gateway.dsl.yaml"));
         messagingModule = loadYaml(dslDir.resolve("deposit-messaging-gateway.dsl.yaml"));
+        offersModule = loadYaml(dslDir.resolve(BenchmarkModuleCompiler.OFFERS_DSL_FILE));
         log.info("Loaded DSL modules from {}", dslDir);
     }
 
@@ -40,6 +43,15 @@ public class DslLoader {
 
     public Map<String, Object> messagingModule() {
         return messagingModule;
+    }
+
+    public Map<String, Object> offersModule() {
+        return offersModule;
+    }
+
+    public synchronized void reloadOffersRaw() throws IOException {
+        Path dslDir = Path.of(properties.dslPath());
+        offersModule = loadYaml(dslDir.resolve(BenchmarkModuleCompiler.OFFERS_DSL_FILE));
     }
 
     @SuppressWarnings("unchecked")

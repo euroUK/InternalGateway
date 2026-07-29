@@ -18,6 +18,7 @@ gateway:
   dsl-path: ${GATEWAY_DSL_PATH:../dsl}
   envelope-secret: ${GATEWAY_ENVELOPE_SECRET:poc-envelope-secret-min-32-chars!!}
   cors-allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  self-base-url: ${GATEWAY_SELF_BASE_URL:http://127.0.0.1:8080}
   services:
     deposit-offer-service: ${DEPOSIT_OFFER_SERVICE_URL:http://localhost:8090}
     test-processor: ${TEST_PROCESSOR_URL:http://localhost:8092}

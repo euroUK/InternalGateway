@@ -20,6 +20,7 @@ bank\internalgateway\gateway\resilience\GatewayRateLimiter$TokenBucket.class
 bank\internalgateway\gateway\config\GatewayProperties$Resilience$Backoff.class
 bank\internalgateway\gateway\config\GatewayProperties$TestHarness.class
 bank\internalgateway\gateway\messaging\BindingKafkaListenerConfiguration.class
+bank\internalgateway\gateway\dsl\BenchmarkDslConfiguration.class
 bank\internalgateway\gateway\messaging\ConsumeBindingRegistry$FanOutRoute.class
 bank\internalgateway\gateway\messaging\ConsumeBindingRegistry$ResolvedFanOutRouteView.class
 bank\internalgateway\gateway\config\GatewayProperties$Observability.class
@@ -35,6 +36,7 @@ bank\internalgateway\gateway\messaging\EventMappingRegistry$RegisteredEventMappi
 bank\internalgateway\gateway\resilience\ResilienceProfileRegistry.class
 bank\internalgateway\gateway\test\TestScenarioService.class
 bank\internalgateway\gateway\config\GatewayProperties$Envelope.class
+bank\internalgateway\gateway\web\IngressController$1.class
 bank\internalgateway\gateway\config\GatewayProperties.class
 bank\internalgateway\gateway\web\IngressController.class
 bank\internalgateway\gateway\messaging\CanonicalInboundEvent.class

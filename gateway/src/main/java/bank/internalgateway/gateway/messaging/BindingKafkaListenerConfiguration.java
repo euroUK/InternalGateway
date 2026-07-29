@@ -2,36 +2,49 @@ package bank.internalgateway.gateway.messaging;
 
 import bank.internalgateway.gateway.config.GatewayProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.annotation.KafkaListenerConfigurer;
 import org.springframework.kafka.config.KafkaListenerContainerFactory;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistrar;
 import org.springframework.kafka.config.MethodKafkaListenerEndpoint;
+import org.springframework.messaging.handler.annotation.support.DefaultMessageHandlerMethodFactory;
+import org.springframework.messaging.handler.annotation.support.MessageHandlerMethodFactory;
 
 import java.lang.reflect.Method;
 import java.util.List;
 
 @Configuration
+@EnableKafka
 public class BindingKafkaListenerConfiguration implements KafkaListenerConfigurer {
 
     private final GatewayProperties properties;
     private final ConsumeBindingRegistry consumeBindingRegistry;
     private final InboundEventPipeline inboundEventPipeline;
     private final KafkaListenerContainerFactory<?> kafkaListenerContainerFactory;
+    private final MessageHandlerMethodFactory messageHandlerMethodFactory;
 
     public BindingKafkaListenerConfiguration(
             GatewayProperties properties,
             ConsumeBindingRegistry consumeBindingRegistry,
             InboundEventPipeline inboundEventPipeline,
-            KafkaListenerContainerFactory<?> kafkaListenerContainerFactory) {
+            KafkaListenerContainerFactory<?> kafkaListenerContainerFactory,
+            BeanFactory beanFactory) {
         this.properties = properties;
         this.consumeBindingRegistry = consumeBindingRegistry;
         this.inboundEventPipeline = inboundEventPipeline;
         this.kafkaListenerContainerFactory = kafkaListenerContainerFactory;
+        DefaultMessageHandlerMethodFactory factory = new DefaultMessageHandlerMethodFactory();
+        factory.setBeanFactory(beanFactory);
+        factory.afterPropertiesSet();
+        this.messageHandlerMethodFactory = factory;
     }
 
     @Override
     public void configureKafkaListeners(KafkaListenerEndpointRegistrar registrar) {
+        registrar.setMessageHandlerMethodFactory(messageHandlerMethodFactory);
+
         List<String> listenerBindings = properties.kafka() != null
                 ? properties.kafka().listenerBindings()
                 : List.of();
@@ -45,6 +58,7 @@ public class BindingKafkaListenerConfiguration implements KafkaListenerConfigure
             endpoint.setGroupId(consumeBindingRegistry.kafkaConsumerGroup(bindingId));
             endpoint.setTopics(consumeBindingRegistry.kafkaTopic(bindingId));
             endpoint.setBean(new BindingKafkaListener(bindingId, inboundEventPipeline));
+            endpoint.setMessageHandlerMethodFactory(messageHandlerMethodFactory);
             try {
                 Method method = BindingKafkaListener.class.getMethod("onMessage", ConsumerRecord.class);
                 endpoint.setMethod(method);

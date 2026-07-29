@@ -1,5 +1,7 @@
 package bank.internalgateway.gateway.observability;
 
+import bank.internalgateway.dsl.BenchmarkRouteRegistry;
+import bank.internalgateway.dsl.CompiledBenchmarkModule;
 import bank.internalgateway.gateway.config.GatewayProperties;
 import bank.internalgateway.gateway.config.ServiceUrlResolver;
 import bank.internalgateway.gateway.dsl.DslLoader;
@@ -20,6 +22,7 @@ import java.util.stream.Stream;
 public class GatewayConfigViewService {
 
     private final DslLoader dslLoader;
+    private final BenchmarkRouteRegistry benchmarkRouteRegistry;
     private final GatewayProperties properties;
     private final ServiceUrlResolver serviceUrlResolver;
     private final EventMappingRegistry eventMappingRegistry;
@@ -28,12 +31,14 @@ public class GatewayConfigViewService {
 
     public GatewayConfigViewService(
             DslLoader dslLoader,
+            BenchmarkRouteRegistry benchmarkRouteRegistry,
             GatewayProperties properties,
             ServiceUrlResolver serviceUrlResolver,
             EventMappingRegistry eventMappingRegistry,
             ConsumeBindingRegistry consumeBindingRegistry,
             ResilienceProfileRegistry resilienceProfileRegistry) {
         this.dslLoader = dslLoader;
+        this.benchmarkRouteRegistry = benchmarkRouteRegistry;
         this.properties = properties;
         this.serviceUrlResolver = serviceUrlResolver;
         this.eventMappingRegistry = eventMappingRegistry;
@@ -52,7 +57,8 @@ public class GatewayConfigViewService {
                 consumeBindingRegistry.allFanOutRoutes(),
                 Map.of(
                         "opening", moduleMeta(dslLoader.openingModule()),
-                        "messaging", moduleMeta(dslLoader.messagingModule())
+                        "messaging", moduleMeta(dslLoader.messagingModule()),
+                        "offers", moduleMeta(dslLoader.offersModule())
                 )
         );
     }
@@ -91,17 +97,18 @@ public class GatewayConfigViewService {
         return new EventMappingModels.MappingConfigView("", "", Map.of(), Map.of(), Map.of(), List.of());
     }
 
-    @SuppressWarnings("unchecked")
     private List<RouteView> ingressRoutes() {
         List<RouteView> routes = new ArrayList<>();
-        routes.add(new RouteView(
-                "search-deposit-offers",
-                "POST",
-                "/deposit-offers/search",
-                "deposit-offer-service",
-                serviceUrlResolver.resolve("deposit-offer-service") + "/internal/v1/offers/search",
-                "PoC ingress: Business Control stub + identity envelope"
-        ));
+        for (CompiledBenchmarkModule.CompiledIngressRoute route : benchmarkRouteRegistry.currentModule().ingressRoutes()) {
+            routes.add(new RouteView(
+                    route.routeId(),
+                    route.method(),
+                    route.inboundPath(),
+                    route.targetService(),
+                    serviceUrlResolver.resolve(route.targetService()) + route.targetPath(),
+                    "Compiled from deposit-offers-gateway.dsl.yaml"
+            ));
+        }
 
         Object routesObj = dslLoader.openingModule().get("routes");
         if (routesObj instanceof List<?> dslRoutes) {
@@ -136,23 +143,18 @@ public class GatewayConfigViewService {
         return routes;
     }
 
-    @SuppressWarnings("unchecked")
     private List<CapabilityView> capabilities() {
         List<CapabilityView> result = new ArrayList<>();
-        result.add(new CapabilityView(
-                "account-deposit-context",
-                "GET",
-                "/internal/capabilities/accounts/{accountId}/deposit-context",
-                "account-context-provider (stub)",
-                "PoC stub response"
-        ));
-        result.add(new CapabilityView(
-                "organization-display-info",
-                "GET",
-                "/internal/capabilities/organizations/{organizationId}/display-info",
-                "organization-directory-provider (stub)",
-                "PoC stub response"
-        ));
+        for (CompiledBenchmarkModule.CompiledCapabilityRoute capability :
+                benchmarkRouteRegistry.currentModule().capabilities()) {
+            result.add(new CapabilityView(
+                    capability.capabilityId(),
+                    capability.method(),
+                    capability.pathTemplate(),
+                    capability.targetService() + " (" + capability.executionMode() + ")",
+                    "Compiled from deposit-offers-gateway.dsl.yaml"
+            ));
+        }
 
         Object capabilitiesObj = dslLoader.openingModule().get("capabilities");
         if (capabilitiesObj instanceof List<?> capabilities) {

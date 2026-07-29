@@ -1,7 +1,9 @@
 FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /workspace
 COPY pom.xml .
+COPY gateway-dsl-core/pom.xml gateway-dsl-core/pom.xml
 COPY gateway/pom.xml gateway/pom.xml
+COPY scg-gateway/pom.xml scg-gateway/pom.xml
 COPY services/deposit-offer-service/pom.xml services/deposit-offer-service/pom.xml
 COPY services/processor-mock/pom.xml services/processor-mock/pom.xml
 RUN mvn -pl services/deposit-offer-service -am dependency:go-offline -B

@@ -1,5 +1,7 @@
 target/
 **/target/
+**/bin/
+**/obj/
 .mvn/wrapper/maven-wrapper.jar
 .git/
 .idea/

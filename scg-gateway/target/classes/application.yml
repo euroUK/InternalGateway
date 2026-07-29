@@ -1,0 +1,28 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: scg-gateway-benchmark
+
+scg:
+  dsl-path: ${GATEWAY_DSL_PATH:../dsl}
+  envelope-secret: ${GATEWAY_ENVELOPE_SECRET:poc-envelope-secret-min-32-chars!!}
+  deposit-offer-service-url: ${DEPOSIT_OFFER_SERVICE_URL:http://localhost:8090}
+  self-base-url: ${GATEWAY_SELF_BASE_URL:http://127.0.0.1:8081}
+  envelope:
+    issuer: internal-gateway
+    ttl-seconds: 30
+    business-control-evidence-id: poc-stub-passed
+  observability:
+    trace-buffer-size: 500
+    top-routes-limit: 10
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
